@@ -1,0 +1,211 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ACO Configuration",
+  "description": "Agent Controlled Orchestration 配置文件 schema。支持 L0-L3 渐进式披露。",
+  "type": "object",
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "JSON Schema 引用路径"
+    },
+    "level": {
+      "type": "integer",
+      "enum": [0, 1, 2, 3],
+      "default": 0,
+      "description": "配置层级。L0=零配置自动检测，L1=基础配置，L2=完整配置，L3=编程控制"
+    },
+    "agents": {
+      "type": "array",
+      "description": "Agent 池声明（L1+ 必填）",
+      "items": {
+        "type": "object",
+        "required": ["id", "role", "tier"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Agent 唯一标识符"
+          },
+          "role": {
+            "type": "string",
+            "enum": ["coder", "auditor", "architect", "pm", "ux"],
+            "description": "Agent 角色标签"
+          },
+          "tier": {
+            "type": "string",
+            "enum": ["T1", "T2", "T3", "T4"],
+            "description": "Agent 梯队（T1 最低成本，T4 最高能力）"
+          },
+          "runtimeType": {
+            "type": "string",
+            "enum": ["subagent", "acp"],
+            "default": "subagent",
+            "description": "运行时类型"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "rules": {
+      "type": "array",
+      "description": "自定义调度规则（L1+）",
+      "items": {
+        "type": "object",
+        "required": ["id", "condition", "action"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "规则唯一标识符"
+          },
+          "condition": {
+            "type": "object",
+            "description": "规则触发条件",
+            "properties": {
+              "type": {
+                "type": "string",
+                "description": "条件类型"
+              }
+            }
+          },
+          "action": {
+            "type": "object",
+            "description": "规则动作",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": ["allow", "block", "modify"],
+                "description": "动作类型"
+              }
+            }
+          },
+          "priority": {
+            "type": "integer",
+            "default": 0,
+            "description": "规则优先级（数值越大越先评估）"
+          },
+          "description": {
+            "type": "string",
+            "description": "规则描述"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "tiers": {
+      "type": "object",
+      "description": "梯队路由配置（L2+）",
+      "properties": {
+        "defaultTier": {
+          "type": "string",
+          "enum": ["T1", "T2", "T3", "T4"],
+          "default": "T1",
+          "description": "默认起始梯队"
+        },
+        "autoEscalate": {
+          "type": "boolean",
+          "default": true,
+          "description": "失败后是否自动升级梯队"
+        },
+        "maxEscalations": {
+          "type": "integer",
+          "default": 3,
+          "description": "最大升级次数"
+        }
+      },
+      "additionalProperties": false
+    },
+    "chains": {
+      "type": "array",
+      "description": "自定义推进链（L2+）",
+      "items": {
+        "type": "object",
+        "required": ["id", "trigger", "steps"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "链唯一标识符"
+          },
+          "trigger": {
+            "type": "string",
+            "description": "触发条件（label 模式匹配）"
+          },
+          "steps": {
+            "type": "array",
+            "description": "链步骤",
+            "items": {
+              "type": "object",
+              "required": ["action"],
+              "properties": {
+                "action": {
+                  "type": "string",
+                  "description": "步骤动作名称"
+                },
+                "agentRole": {
+                  "type": "string",
+                  "description": "执行此步骤的 Agent 角色"
+                },
+                "promptTemplate": {
+                  "type": "string",
+                  "description": "Prompt 模板（支持 {{prevOutput}} 等变量）"
+                },
+                "timeoutSeconds": {
+                  "type": "integer",
+                  "minimum": 600,
+                  "description": "步骤超时时间"
+                }
+              },
+              "additionalProperties": false
+            }
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "concurrency": {
+      "type": "object",
+      "description": "并发控制配置（L2+）",
+      "properties": {
+        "globalMax": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 5,
+          "description": "全局最大并发派发数"
+        },
+        "perType": {
+          "type": "object",
+          "description": "按 runtime type 的并发上限",
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "adapterPath": {
+      "type": "string",
+      "description": "自定义 Adapter 路径（L3）"
+    },
+    "customRulesPath": {
+      "type": "string",
+      "description": "自定义规则脚本路径（L3）"
+    },
+    "substantiveFailure": {
+      "type": "object",
+      "description": "实质失败判定配置",
+      "properties": {
+        "minOutputTokens": {
+          "type": "integer",
+          "default": 3000,
+          "description": "低于此 token 数视为可疑产出"
+        },
+        "requireFileOutput": {
+          "type": "boolean",
+          "default": true,
+          "description": "是否要求文件产出（与 token 阈值联合判定）"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

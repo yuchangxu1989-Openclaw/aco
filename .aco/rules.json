@@ -1,0 +1,68 @@
+[
+  {
+    "ruleId": "rule-mouhz2ex",
+    "priority": 50,
+    "description": "test rule",
+    "enabled": true,
+    "condition": {
+      "taskType": "audit"
+    },
+    "action": "block",
+    "createdAt": "2026-05-06T20:16:01.017Z"
+  },
+  {
+    "ruleId": "rule-mouhz2f1",
+    "priority": 50,
+    "description": "test rule",
+    "enabled": true,
+    "condition": {
+      "taskType": "audit"
+    },
+    "action": "block",
+    "createdAt": "2026-05-06T20:16:01.021Z"
+  },
+  {
+    "ruleId": "rule-mouhz2f5",
+    "priority": 50,
+    "description": "test",
+    "enabled": true,
+    "condition": {
+      "taskType": "audit"
+    },
+    "action": "block",
+    "createdAt": "2026-05-06T20:16:01.025Z"
+  },
+  {
+    "ruleId": "rule-mouhzar3",
+    "priority": 50,
+    "description": "test rule",
+    "enabled": true,
+    "condition": {
+      "taskType": "audit"
+    },
+    "action": "block",
+    "createdAt": "2026-05-06T20:16:11.823Z"
+  },
+  {
+    "ruleId": "rule-mouhzar6",
+    "priority": 50,
+    "description": "test rule",
+    "enabled": true,
+    "condition": {
+      "taskType": "audit"
+    },
+    "action": "block",
+    "createdAt": "2026-05-06T20:16:11.826Z"
+  },
+  {
+    "ruleId": "rule-mouhzar9",
+    "priority": 50,
+    "description": "test",
+    "enabled": true,
+    "condition": {
+      "taskType": "audit"
+    },
+    "action": "block",
+    "createdAt": "2026-05-06T20:16:11.829Z"
+  }
+]

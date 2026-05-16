@@ -1,0 +1,15 @@
+[
+  {
+    "agentId": "dev-01",
+    "tier": "T2",
+    "runtimeType": "subagent",
+    "roles": [
+      "coder"
+    ],
+    "maxConcurrency": 1,
+    "status": "idle",
+    "activeTasks": 0,
+    "totalCompleted": 0,
+    "totalFailed": 0
+  }
+]

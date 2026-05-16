@@ -1,0 +1,50 @@
+{
+  "name": "@self-evolving-harness/aco",
+  "version": "0.5.5",
+  "description": "Agent 协调编排器 - 智能调度、任务链编排、故障自愈",
+  "type": "module",
+  "main": "dist/cjs/index.js",
+  "module": "dist/esm/index.js",
+  "types": "dist/esm/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/esm/index.d.ts",
+      "import": "./dist/esm/index.js",
+      "require": "./dist/cjs/index.js"
+    },
+    "./plugin": {
+      "types": "./dist/esm/plugin/index.d.ts",
+      "import": "./dist/esm/plugin/index.js",
+      "require": "./dist/cjs/plugin/index.js"
+    }
+  },
+  "bin": {
+    "aco": "./src/cli.js"
+  },
+  "scripts": {
+    "build": "tsc && tsc -p tsconfig.cjs.json && node scripts/fix-cjs.js",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.7.0",
+    "uuid": "^14.0.0",
+    "yaml": "^2.8.4"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.12",
+    "@types/node": "^22.0.0",
+    "@types/uuid": "^10.0.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.1.0"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "files": [
+    "src",
+    "dist",
+    "README.md",
+    "LICENSE"
+  ]
+}
