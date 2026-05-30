@@ -1,0 +1,11 @@
+{
+  "id": "aco-doctor-guard",
+  "name": "Doctor 命令守卫",
+  "description": "阻止危险的 doctor --fix 操作，强制配置验证流程",
+  "version": "1.2.0",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {}
+  }
+}

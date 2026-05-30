@@ -1,0 +1,23 @@
+{
+  "id": "aco-research-anti-crawl-guard",
+  "name": "ACO Research Anti-Crawl Guard",
+  "version": "1.0.0",
+  "main": "index.js",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "enabled": {
+        "type": "boolean"
+      },
+      "extraKeywords": {
+        "type": "array",
+        "items": { "type": "string" }
+      },
+      "excludeLabels": {
+        "type": "array",
+        "items": { "type": "string" }
+      }
+    }
+  }
+}

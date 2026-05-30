@@ -1,0 +1,15 @@
+{
+  "id": "aco-notify",
+  "name": "ACO Task Completion Notify",
+  "version": "0.1.0",
+  "main": "index.js",
+  "configSchema": {
+    "type": "object",
+    "properties": {
+      "userId": { "type": "string" },
+      "excludeLabels": { "type": "array", "items": { "type": "string" } },
+      "taskSources": { "type": "array", "items": { "type": "string" } }
+    },
+    "additionalProperties": false
+  }
+}

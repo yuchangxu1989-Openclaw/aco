@@ -1,0 +1,11 @@
+{
+  "id": "aco-objective-fact-guard",
+  "name": "客观事实守卫",
+  "description": "强制注入客观事实优先铁律，功能化守卫任务状态汇报",
+  "version": "1.1.0",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {}
+  }
+}

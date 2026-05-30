@@ -1,0 +1,70 @@
+{
+  "id": "aco-output-humanizer-guard",
+  "name": "出站消息人话门禁",
+  "description": "守卫主会话出站消息，检测技术标签并自动改写为人话或注入提醒，确保用户永远不会收到带技术标签的消息",
+  "version": "1.0.0",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "enabled": {
+        "type": "boolean",
+        "default": true,
+        "description": "全局开关"
+      },
+      "strategy": {
+        "type": "string",
+        "enum": ["rewrite", "remind"],
+        "default": "remind",
+        "description": "处理策略：rewrite(LLM改写) 或 remind(注入提醒)"
+      },
+      "channels": {
+        "type": "array",
+        "items": { "type": "string" },
+        "default": ["feishu"],
+        "description": "生效渠道列表"
+      },
+      "strictness": {
+        "type": "string",
+        "enum": ["strict", "moderate", "relaxed"],
+        "default": "strict",
+        "description": "检测严格度"
+      },
+      "allowPatterns": {
+        "type": "array",
+        "items": { "type": "string" },
+        "default": [],
+        "description": "白名单正则数组，命中的文本片段不触发检测"
+      },
+      "patterns": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "category": { "type": "string" },
+            "pattern": { "type": "string" },
+            "description": { "type": "string" }
+          },
+          "required": ["category", "pattern"]
+        },
+        "default": [],
+        "description": "用户自定义检测模式（追加到内置模式）"
+      },
+      "rewriteModel": {
+        "type": "string",
+        "default": "",
+        "description": "策略B使用的LLM模型，空则复用宿主默认模型"
+      },
+      "rewriteTimeout": {
+        "type": "number",
+        "default": 30000,
+        "description": "策略B的LLM改写超时（毫秒）"
+      },
+      "remindMaxRetries": {
+        "type": "number",
+        "default": 3,
+        "description": "策略C的最大重试次数"
+      }
+    }
+  }
+}

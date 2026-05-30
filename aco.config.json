@@ -1,0 +1,14 @@
+{
+  "notification": {
+    "channels": [
+      {
+        "channelId": "feishu-lark-cli",
+        "type": "feishu",
+        "config": {
+          "transport": "lark-cli"
+        },
+        "enabled": true
+      }
+    ]
+  }
+}

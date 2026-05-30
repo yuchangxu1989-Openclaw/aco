@@ -1,0 +1,27 @@
+{
+  "id": "aco-closure-guard",
+  "name": "ACO Closure Guard",
+  "version": "1.0.0",
+  "main": "index.js",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": true,
+    "properties": {
+      "enabled": {
+        "type": "boolean"
+      },
+      "excludeLabels": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      },
+      "closureTimeoutMs": {
+        "type": "number"
+      },
+      "autoCloseDelayMs": {
+        "type": "number"
+      }
+    }
+  }
+}

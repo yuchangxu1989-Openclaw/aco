@@ -1,0 +1,9 @@
+node_modules/
+.next/
+web/.next/
+out/
+web/out/
+dist/
+*.tsbuildinfo
+.vitest/
+coverage/

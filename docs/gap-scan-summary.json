@@ -1,0 +1,43 @@
+{
+  "summary": {
+    "l1": {
+      "pass": false,
+      "total": 0,
+      "covered": 0
+    },
+    "l2": {
+      "pass": true,
+      "total": 0,
+      "covered": 0,
+      "needsReview": 0
+    },
+    "l3": {
+      "pass": true,
+      "total": 0,
+      "alive": 0
+    },
+    "overall": "fail",
+    "timestamp": "2026-05-23T20:31:46.073Z",
+    "blockers": [
+      "L1 file-level scan failed: uncovered FR, compile failure, or test failure."
+    ]
+  },
+  "l1": {
+    "level": "l1",
+    "pass": false,
+    "timestamp": "2026-05-23T20:31:46.072Z",
+    "entries": [],
+    "compile": {
+      "command": "npx tsc --noEmit",
+      "passed": true,
+      "exitCode": 0,
+      "output": ""
+    },
+    "tests": {
+      "command": "npm test",
+      "passed": false,
+      "exitCode": 1,
+      "output": "\n> @self-evolving-harness/aco@0.5.9 test\n> vitest run\n\n\n RUN  v3.2.4 /root/.openclaw/workspace/projects/aco\n\n ❯ src/cli/cli.test.ts (21 tests | 1 failed) 60ms\n   ✓ CLI > aco board (FR-E02) > should show active tasks in table format (FR-E02 AC1) 7ms\n   ✓ CLI > aco board (FR-E02) > should filter by status (FR-E02 AC2) 2ms\n   ✓ CLI > aco board (FR-E02) > should filter by agent (FR-E02 AC2) 2ms\n   ✓ CLI > aco board (FR-E02) > should output JSON format (FR-E02 AC4) 2ms\n   ✓ CLI > aco board (FR-E02) > should handle empty board (FR-E02 AC3) 2ms\n   ✓ CLI > aco board (FR-E02) > should handle missing board file 1ms\n   ✓ CLI > aco stats (FR-E03) > should show stats for default 24h period (FR-E03 AC2) 4ms\n   ✓ CLI > aco stats (FR-E03) > should accept --period flag (FR-E03 AC2) 2ms\n   ✓ CLI > aco stats (FR-E03) > should reject invalid period 3ms\n   ✓ CLI > aco stats (FR-E03) > should output JSON format (FR-E03 AC4) 2ms\n   ✓ CLI > aco stats (FR-E03) > should show per-agent stats (FR-E03 AC1) 2ms\n   ✓ CLI > aco stats (FR-E03) > should handle empty audit log (FR-E03 AC4) 1ms\n   ✓ CLI > aco audit (FR-E04) > should show task decision trace (FR-E04 AC1) 2ms\n   ✓ CLI > aco audit (FR-E04) > should output JSON with retry attempts (FR-E04 AC3/AC4) 3ms\n   ✓ CLI > aco audit (FR-E04) > should show retry attempts in table format (FR-E04 AC3) 2ms\n   ✓ CLI > aco audit (FR-E04) > should filter by agent (FR-E04 AC2) 2ms\n   ✓ CLI > aco audit (FR-E04) > should handle no entries found 1ms\n   ✓ CLI > help and routing > should show help with --help flag 1ms\n   ✓ CLI > help and routing > should show help with no args 1ms\n   × CLI > help and routing > should show version 12ms\n     → expected 'unknown' to match /\\d+\\.\\d+\\.\\d+/\n   ✓ CLI > help and routing > should error on unknown command 1ms\n ✓ __tests__/scheduler.test.ts (6 tests) 468ms\n ✓ __tests__/notification-manager.test.ts (22 tests) 665ms\n ✓ src/notification/notification.test.ts (24 tests) 203ms\n ✓ src/health/health-monitor.test.ts (27 tests) 140m…"
+    }
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "id": "aco-dispatch-guard",
+  "name": "Agent调度守卫",
+  "version": "1.0.0",
+  "description": "强制注入Agent调度规范，确保任务时长、Agent选择、禁止poll等合规",
+  "entry": "./index.js",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {}
+  }
+}

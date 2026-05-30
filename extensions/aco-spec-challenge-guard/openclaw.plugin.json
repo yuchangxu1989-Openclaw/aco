@@ -1,0 +1,11 @@
+{
+  "id": "aco-spec-challenge-guard",
+  "name": "Spec 挑战收敛守卫",
+  "description": "前置注入 spec 挑战收敛沉淀约束和意图主动澄清约束",
+  "version": "1.0.0",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {}
+  }
+}

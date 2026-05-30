@@ -1,0 +1,11 @@
+{
+  "id": "aco-browser-session-lease",
+  "name": "Browser Session Lease",
+  "version": "0.1.0",
+  "main": "index.js",
+  "configSchema": {
+    "type": "object",
+    "properties": {},
+    "additionalProperties": true
+  }
+}
