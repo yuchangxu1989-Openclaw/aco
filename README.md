@@ -216,9 +216,9 @@ Examples:
 - Require anti-crawl fallback paths.
 - Require Feishu/Lark summary delivery after completion.
 - Require spec challenge before implementation.
-- Require Think Before Coding before coding starts.
-- Require Goal-Driven Execution with explicit success criteria and post-checks.
-- Require independent repository synchronization through the standard sync script when project changes must be mirrored.
+- Require FR-K22 Think Before Coding before coding starts.
+- Require FR-K23 Goal-Driven Execution with explicit success criteria and post-checks.
+- Require FR-K24 independent repository synchronization through the standard sync script when project changes must be mirrored.
 - Require kill-impact scanning before destructive intervention.
 
 These are runtime rules. They do not rely on model goodwill.
