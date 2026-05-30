@@ -18,6 +18,11 @@ import type {
   RoleTag,
   Tier,
 } from '../types/index.js';
+import {
+  normalizeRoleTag,
+  inferTierByAgentId,
+  buildTaskRoleMappingFromRoleTags,
+} from '../shared/routing-registry.js';
 
 // --- Types ---
 
@@ -58,44 +63,7 @@ interface AgentInfo {
 
 // --- Constants ---
 
-/**
- * 规范角色别名映射：spec 值 → 内部 RoleTag
- * 宿主配置可能使用 spec 定义的角色名（如 "coding"），
- * 内部统一映射到 RoleTag（如 "coder"）
- */
-const ROLE_ALIAS_MAP: Record<string, RoleTag> = {
-  coding: 'coder',
-  review: 'auditor',
-  architecture: 'architect',
-  research: 'researcher',
-  // 以下值与内部 RoleTag 一致，无需映射但保留以支持两种写法
-  coder: 'coder',
-  auditor: 'auditor',
-  architect: 'architect',
-  researcher: 'researcher',
-  pm: 'pm',
-  ux: 'ux',
-};
-
-/** 默认任务类型→角色映射（AC2: 从配置动态构建，此为 fallback） */
-const DEFAULT_TASK_ROLE_MAPPING: Record<string, string[]> = {
-  coding: ['coder'],
-  refactoring: ['coder'],
-  testing: ['coder'],
-  bugfix: ['coder'],
-  architecture: ['architect'],
-  design: ['architect'],
-  review: ['auditor'],
-  audit: ['auditor'],
-  security: ['auditor'],
-  requirements: ['pm'],
-  spec: ['pm'],
-  planning: ['pm'],
-  ux_review: ['ux'],
-  visual: ['ux'],
-  research: ['researcher'],
-  analysis: ['researcher'],
-};
+const DEFAULT_TASK_ROLE_MAPPING: Record<string, string[]> = buildTaskRoleMappingFromRoleTags();
 
 const DEFAULT_ROLE_DISCOVERY_CONFIG: RoleDiscoveryConfig = {
   defaultTaskRoleMapping: DEFAULT_TASK_ROLE_MAPPING,
@@ -316,10 +284,7 @@ export class RoleDiscovery {
    * 规范化角色名：将 spec 值映射到内部 RoleTag
    */
   private normalizeRoles(roles: string[]): RoleTag[] {
-    return roles.map(role => {
-      const normalized = role.toLowerCase().trim();
-      return ROLE_ALIAS_MAP[normalized] ?? normalized;
-    });
+    return roles.map(role => normalizeRoleTag(role));
   }
 
   /**
@@ -327,6 +292,9 @@ export class RoleDiscovery {
    * 优先使用显式声明；无声明时根据 model 和 runtime type 推断
    */
   private inferTier(agent: DiscoveredAgent): Tier {
+    const explicitById = inferTierByAgentId(agent.agentId);
+    if (explicitById) return explicitById as Tier;
+
     // 从 model 名称推断 runtime type 和 tier
     const model = agent.model?.toLowerCase() ?? '';
 

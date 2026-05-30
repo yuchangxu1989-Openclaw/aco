@@ -11,6 +11,7 @@ import { hasFlag } from '../parse-args.js';
 import { createEventBus, createNotificationManager, loadFileConfig, fileExists as sharedFileExists } from './shared.js';
 import type { AcoFileConfig, NotificationChannelFileEntry } from '../../config/config-schema.js';
 import { runAllGenerators, listGenerators } from '../../generators/index.js';
+import { inferRoleByAgentId, inferTierByAgentId } from '../../shared/routing-registry.js';
 
 const HELP = `
 aco init — 初始化 ACO L2 调度规则
@@ -159,24 +160,16 @@ function inferRoles(agent: Record<string, unknown>): string[] {
   if (Array.isArray(rawRoles)) return rawRoles.filter((r): r is string => typeof r === 'string');
   if (typeof rawRoles === 'string') return [rawRoles];
 
-  const id = String(agent.id ?? '');
-  const runtimeType = inferRuntimeType(agent);
-  if (id.includes('audit')) return ['audit'];
-  if (id.includes('pm')) return ['product'];
-  if (id.includes('sa')) return ['architecture'];
-  if (id.includes('ux')) return ['ux'];
-  if (runtimeType === 'acp' || id.includes('dev') || id.includes('code') || id === 'cc') return ['coding'];
-  return [];
+  const inferredRole = inferRoleByAgentId(String(agent.id ?? ''));
+  return inferredRole ? [inferredRole] : [];
 }
 
 function inferTier(agent: Record<string, unknown>): string | number | undefined {
   if (typeof agent.tier === 'string' || typeof agent.tier === 'number') return agent.tier;
-  const id = String(agent.id ?? '');
-  if (id === 'cc' || id === 'free-code') return 1;
-  if (id === 'opencode' || id === 'codex') return 2;
-  if (id === 'hermes') return 3;
-  if (id.startsWith('dev-')) return 4;
-  return undefined;
+  const inferredTier = inferTierByAgentId(String(agent.id ?? ''));
+  if (!inferredTier) return undefined;
+  const numericTier = Number.parseInt(inferredTier.replace(/^T/i, ''), 10);
+  return Number.isFinite(numericTier) ? numericTier : inferredTier;
 }
 
 function inferRuntimeType(agent: Record<string, unknown>): HostAgent['runtimeType'] {

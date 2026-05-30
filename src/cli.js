@@ -1,7 +1,10 @@
 #!/usr/bin/env node
 import { access, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
-import { homedir } from 'node:os';
+import { createRequire } from 'module';
+
+const require = createRequire(import.meta.url);
+const { inferRoleByAgentId, inferTierByAgentId } = require('../../../extensions/aco-dispatch-guard/routing-registry.cjs');
 
 const HELP = `ACO — Agent Controlled Orchestration
 
@@ -84,24 +87,16 @@ function inferRoles(agent) {
   const raw = agent.roles ?? agent.role;
   if (Array.isArray(raw)) return raw.filter(r => typeof r === 'string');
   if (typeof raw === 'string') return [raw];
-  const id = String(agent.id || '');
-  const runtimeType = inferRuntimeType(agent);
-  if (id.includes('audit')) return ['audit'];
-  if (id.includes('pm')) return ['product'];
-  if (id.includes('sa')) return ['architecture'];
-  if (id.includes('ux')) return ['ux'];
-  if (runtimeType === 'acp' || id.includes('dev') || id.includes('code') || id === 'cc') return ['coding'];
-  return [];
+  const inferredRole = inferRoleByAgentId(String(agent.id || ''));
+  return inferredRole ? [inferredRole] : [];
 }
 
 function inferTier(agent) {
   if (typeof agent.tier === 'string' || typeof agent.tier === 'number') return agent.tier;
-  const id = String(agent.id || '');
-  if (id === 'cc' || id === 'free-code') return 1;
-  if (id === 'opencode' || id === 'codex') return 2;
-  if (id === 'hermes') return 3;
-  if (id.startsWith('dev-')) return 4;
-  return undefined;
+  const inferredTier = inferTierByAgentId(String(agent.id || ''));
+  if (!inferredTier) return undefined;
+  const numericTier = Number.parseInt(String(inferredTier).replace(/^T/i, ''), 10);
+  return Number.isFinite(numericTier) ? numericTier : inferredTier;
 }
 
 function extractAgents(config) {
