@@ -6,7 +6,7 @@ ACO and SEVO together build an open-source, programmable, self-evolving governan
 
 CrewAI, AutoGen, LangGraph, and MetaGPT solve **"let agents start working."** ACO solves **"keep agents from losing control, drifting off-spec, or stalling out across long-horizon operation — and force every run to converge to a real, delivered result."**
 
-**13 L2 plugins. 70+ deterministic rules. 16-way concurrent dispatch. Automatic dead-task cleanup.**
+**12 L2 plugins. 70+ deterministic rules. 16-way concurrent dispatch. Automatic dead-task cleanup.**
 
 ACO turns multi-agent work from "agents can run" into "agents run under deterministic control." Orchestration, L2 guardrails, audit trails, failure recovery, and self-evolving operating discipline ship as one OpenClaw extension suite — at the runtime control plane, where rules cannot be diluted by long context or skipped by tired models.
 
@@ -61,14 +61,16 @@ Validates every dispatch before an agent starts work.
 - Checks whether the target agent exists in the live OpenClaw configuration.
 - Blocks same-agent concurrent execution.
 - Enforces role-to-task matching.
+- Uses LLM semantic classification ahead of keyword heuristics for task-type judgment; keywords can support routing, but they are no longer the first source of truth.
 - Verifies explicit `agentId` choices still match the task type, so a forced assignment cannot bypass role discipline.
 - Strips invalid runtime overrides.
 - Injects README quality rules when documentation tasks are detected.
 - Blocks SEVO pipeline bypass when the pipeline owns the task.
 - Enforces “no development without spec alignment” for coding work.
+- Applies the T1 health-scan mandatory rule only to coding-class tasks, so operational health checks do not get blocked by a coding-only gate.
 - Pre-checks task impact scope before spawn and requires the prompt to declare the intended file or artifact domain.
 
-This is the front door of the system.
+This is the front door of the system. Role-matching is owned here; the old standalone `aco-role-matching-guard-fr` plugin is no longer part of the extension suite.
 
 ### 2. Run Watchdog / 运行看门狗
 
@@ -140,6 +142,7 @@ Keeps user-facing output direct and readable.
 
 - Blocks mechanical AI phrasing.
 - Encourages short, human summaries.
+- Blocks overstepping language that assigns work back to the user when the agent should close the loop itself.
 - Reduces technical leakage in final reports.
 
 The user gets conclusions, not internal machinery.
@@ -213,6 +216,9 @@ Examples:
 - Require anti-crawl fallback paths.
 - Require Feishu/Lark summary delivery after completion.
 - Require spec challenge before implementation.
+- Require Think Before Coding before coding starts.
+- Require Goal-Driven Execution with explicit success criteria and post-checks.
+- Require independent repository synchronization through the standard sync script when project changes must be mirrored.
 - Require kill-impact scanning before destructive intervention.
 
 These are runtime rules. They do not rely on model goodwill.
@@ -437,7 +443,7 @@ ACO uses layered control.
 
 ACO puts critical controls at L2 and L3 because those layers are harder for a model to forget.
 
-Legacy task-board enqueue compatibility goes through `scripts/local-subagent-board.js`; the board bridge is not located at the workspace root.
+Legacy task-board enqueue compatibility goes through `scripts/local-subagent-board.js`; the board bridge is not located at the workspace root. Independent repository mirroring goes through `scripts/sync-independent-repos.sh`, whose checks distinguish real drift from generated-file and ignore-rule noise to avoid false-positive sync failures.
 
 ---
 
