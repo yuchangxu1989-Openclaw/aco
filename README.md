@@ -1,7 +1,5 @@
 # ACO — Agent Coordination & Orchestration
 
-OpenClaw（pm-01 子Agent）2026-05-29
-
 **The runtime governance engine for AI Agent teams.**
 
 ACO and SEVO together build an open-source, programmable, self-evolving governance kernel for AI Agent teams. The thesis is simple: an Agent system you can trust with production work treats governance as a first-class capability — equal in weight to construction, and designed as one integrated piece with it, not bolted on afterward.
@@ -438,6 +436,8 @@ ACO uses layered control.
 - **L6 — Prompt discipline**: human-readable operating rules for models.
 
 ACO puts critical controls at L2 and L3 because those layers are harder for a model to forget.
+
+Legacy task-board enqueue compatibility goes through `scripts/local-subagent-board.js`; the board bridge is not located at the workspace root.
 
 ---
 

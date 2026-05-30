@@ -4,6 +4,8 @@ import { execSync } from 'node:child_process';
 
 const AUDIT_LOG_PATH = '/root/.openclaw/workspace/logs/aco-notify-closure-events.jsonl';
 
+const NOTIFY_USER_ID = 'ou_ba47b9dd81419f75c4febdd199bde7d8';
+
 export default {
   id: 'aco-notify',
   name: 'aco-notify',
@@ -12,7 +14,7 @@ export default {
 
   register(api) {
     const config = api.pluginConfig?.['aco-notify'] || {};
-    const userId = config.userId || 'ou_ba47b9dd81419f75c4febdd199bde7d8';
+    const userId = config.userId || config.notify?.userId || NOTIFY_USER_ID;
     const excludeLabels = config.excludeLabels || ['healthcheck', 'heartbeat'];
     const closureTimeoutMs = config.closureTimeoutMs || 120000;
     const minForwardContentLength = config.minForwardContentLength || 20;

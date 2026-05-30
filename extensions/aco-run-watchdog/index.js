@@ -42,6 +42,7 @@ const BOARD_PATH = '/root/.openclaw/workspace/logs/subagent-task-board.json';
 const SUBAGENT_INDEX_PATH = '/root/.openclaw/workspace/logs/subagent-task-index.json';
 const RECOVERY_PATH = '/root/.openclaw/workspace/logs/run-watchdog-recovery.json';
 const RECOVERY_LOCK_PATH = '/root/.openclaw/workspace/logs/run-watchdog-recovery.lock';
+const WORKSPACE_ROOT = path.resolve(path.dirname(BOARD_PATH), '..');
 // [H-07 fix] 环境变量边界校验：不低于 300000ms (5min)，不超过 7200000ms (2h)
 const STALE_MS = Math.max(300000, Math.min(7200000, Number(process.env.RUN_WATCHDOG_STALE_MS || 1800000)));
 // [idle-alert] 子 Agent 疑似卡死告警阈值：默认 5min，最小 3min，最大 30min
@@ -49,7 +50,8 @@ const IDLE_ALERT_MS = Math.max(180000, Math.min(1800000, Number(process.env.RUN_
 const ACP_STALE_MS = Math.max(300000, Math.min(7200000, Number(process.env.RUN_WATCHDOG_ACP_STALE_MS || 1800000)));
 const AUTO_RECOVER = process.env.RUN_WATCHDOG_AUTO_RECOVER === '1';
 const WATCHDOG_BUILD = '2026-04-10-recovery-probe-1';
-const BOARD_BRIDGE_SCRIPT = '/root/.openclaw/workspace/scripts/local-subagent-board.js';
+const DEFAULT_NOTIFY_USER_ID = 'ou_ba47b9dd81419f75c4febdd199bde7d8';
+const BOARD_BRIDGE_SCRIPT = path.join(WORKSPACE_ROOT, 'scripts', 'local-subagent-board.js');
 const BOARD_NOTIFY_EVENTS_PATH = '/root/.openclaw/workspace/logs/subagent-notify-events.jsonl';
 
 // [tool-trace] 工具调用链记录
@@ -1319,12 +1321,14 @@ const plugin = {
     // [H-06 fix] 不再自动写 openclaw.json，改为只记录建议
     function disableMemoryCore(api, reason) {
       try {
+        const rawConfig = api.pluginConfig?.['aco-run-watchdog'] || {};
+        const notifyUserId = rawConfig.notify?.userId || rawConfig.userId || DEFAULT_NOTIFY_USER_ID;
         api.logger.warn(`[aco-run-watchdog] memory-core circuit breaker TRIPPED: ${reason}. 建议手动禁用 memory-core 插件。`);
         appendBreakerEvent({ type: 'breaker_tripped', reason, action: 'log_recommendation_only' });
         // Notify user via lark-cli
         const msg = `⚠️ memory-core 熔断：${reason}。已自动禁用 memory-core，Gateway 将自动 reload。memory_search 降级为纯文本。`;
         execFile('lark-cli', ['im', '+messages-send',
-          '--user-id', 'ou_ba47b9dd81419f75c4febdd199bde7d8',
+          '--user-id', notifyUserId,
           '--markdown', msg], { timeout: 15000 }, () => {});
       } catch (e) {
         api.logger.warn(`[aco-run-watchdog] memory-core breaker disable failed: ${e.message}`);
