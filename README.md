@@ -39,6 +39,16 @@ aco demo
 - Visible task-state tracking for queued, running, failed, and completed work.
 - Failure recovery paths for stale tasks, zombie sessions, and low-substance completions.
 
+## Live Task Board in Your IM
+
+The task board does not stay trapped behind a dashboard you have to remember to open. ACO's watchdog plugin pushes a live board card straight to your IM whenever task state changes, so the operational picture comes to you.
+
+![Task board card pushed to Feishu](docs/assets/feishu-task-board-card.jpg)
+
+The card above shows real multi-agent work in motion: 7 agents running in parallel, 186 tasks completed, and the current running and recently finished tasks alongside the day's stats. Every state change reaches you in chat without polling, refreshing, or context switching.
+
+This is zero configuration. The watchdog discovers your IM identity from runtime state, so there is no open_id to wire up, no webhook to register, and no extra setup step. Install ACO, run your agents, and the board starts pushing.
+
 ## Core Concepts
 
 ### Plugin system
