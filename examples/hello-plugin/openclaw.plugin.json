@@ -1,0 +1,6 @@
+{
+  "id": "aco-hello-plugin",
+  "name": "Hello Plugin",
+  "version": "1.0.0",
+  "description": "Minimum viable ACO plugin that hooks an event and logs a greeting"
+}

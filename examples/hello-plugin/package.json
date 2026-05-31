@@ -1,0 +1,13 @@
+{
+  "name": "aco-hello-plugin",
+  "version": "1.0.0",
+  "description": "Minimal ACO plugin example — hooks before_prompt_build and prints hello",
+  "type": "module",
+  "main": "index.js",
+  "scripts": {
+    "start": "node -e \"import('./index.js').then(m => console.log('Plugin loaded:', m.default?.id))\"",
+    "test": "node --test test.js"
+  },
+  "keywords": ["aco", "plugin", "example"],
+  "license": "MIT"
+}

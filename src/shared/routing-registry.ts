@@ -1,4 +1,19 @@
-export const ROLE_ALIASES = Object.freeze({
+type RoleName = 'pm' | 'research' | 'architecture' | 'coding' | 'review' | 'ux';
+type BuiltInRoleTag = 'coder' | 'auditor' | 'architect' | 'pm' | 'ux' | 'researcher';
+type CodingTier = 'T1' | 'T2' | 'T3';
+type AgentRuntime = 'acp' | 'subagent';
+type NonCodingTier = 'research' | 'arch' | 'pm' | 'audit' | 'ux';
+
+type RoleMap = Readonly<Record<RoleName, readonly string[]>>;
+type RoleTagTaskTypes = Readonly<Record<BuiltInRoleTag, readonly string[]>>;
+type AgentTierFallbackEntry = Readonly<{
+  id: string;
+  runtime: AgentRuntime;
+  role: RoleName;
+  tier: CodingTier | NonCodingTier;
+}>;
+
+export const ROLE_ALIASES: Readonly<Record<string, RoleName>> = Object.freeze({
   coding: 'coding',
   coder: 'coding',
   code: 'coding',
@@ -20,9 +35,9 @@ export const ROLE_ALIASES = Object.freeze({
   research: 'research',
   researcher: 'research',
   analysis: 'research',
-});
+} satisfies Record<string, RoleName>);
 
-export const ROLE_TAG_ALIASES = Object.freeze({
+export const ROLE_TAG_ALIASES: Readonly<Record<string, BuiltInRoleTag>> = Object.freeze({
   coding: 'coder',
   coder: 'coder',
   code: 'coder',
@@ -44,9 +59,9 @@ export const ROLE_TAG_ALIASES = Object.freeze({
   spec: 'pm',
   requirements: 'pm',
   ux: 'ux',
-});
+} satisfies Record<string, BuiltInRoleTag>);
 
-export const ROLE_AGENT_FALLBACK = Object.freeze({
+export const ROLE_AGENT_FALLBACK: RoleMap = Object.freeze({
   pm: Object.freeze(['pm-01', 'pm-02']),
   research: Object.freeze(['feynman', 're', 'codex', 'sa-01', 'sa-02', 'pm-01', 'pm-02', 'ux-01']),
   architecture: Object.freeze(['sa-01', 'sa-02']),
@@ -55,7 +70,7 @@ export const ROLE_AGENT_FALLBACK = Object.freeze({
   ux: Object.freeze(['ux-01']),
 });
 
-export const ROLE_TASK_TYPES = Object.freeze({
+export const ROLE_TASK_TYPES: RoleMap = Object.freeze({
   pm: Object.freeze(['spec', 'readme']),
   research: Object.freeze(['research']),
   architecture: Object.freeze(['architecture', 'ac', 'design']),
@@ -64,7 +79,7 @@ export const ROLE_TASK_TYPES = Object.freeze({
   ux: Object.freeze(['ux', 'ux_review', 'visual']),
 });
 
-export const ROLE_TAG_TASK_TYPES = Object.freeze({
+export const ROLE_TAG_TASK_TYPES: RoleTagTaskTypes = Object.freeze({
   coder: Object.freeze(['coding', 'refactoring', 'testing', 'bugfix']),
   architect: Object.freeze(['architecture', 'design']),
   auditor: Object.freeze(['review', 'audit', 'security']),
@@ -94,9 +109,9 @@ export const TASK_TYPE_EXPECTED_ROLE = Object.freeze({
   ux_review: 'ux',
   visual: 'ux',
   readme: 'pm',
-});
+} satisfies Record<string, RoleName>);
 
-export const CODING_TIER_BY_AGENT_ID = Object.freeze({
+export const CODING_TIER_BY_AGENT_ID: Readonly<Record<string, CodingTier>> = Object.freeze({
   cc: 'T1',
   codex: 'T1',
   omp: 'T1',
@@ -105,9 +120,9 @@ export const CODING_TIER_BY_AGENT_ID = Object.freeze({
   opencode: 'T2',
   'dev-01': 'T3',
   'dev-02': 'T3',
-});
+} satisfies Record<string, CodingTier>);
 
-export const DEFAULT_AGENT_TIER_FALLBACK = Object.freeze([
+export const DEFAULT_AGENT_TIER_FALLBACK: readonly AgentTierFallbackEntry[] = Object.freeze([
   Object.freeze({ id: 'cc', runtime: 'acp', role: 'coding', tier: 'T1' }),
   Object.freeze({ id: 'codex', runtime: 'acp', role: 'coding', tier: 'T1' }),
   Object.freeze({ id: 'omp', runtime: 'acp', role: 'coding', tier: 'T1' }),
@@ -133,29 +148,34 @@ export const HEALTH_SCAN_T1_AGENT_IDS = Object.freeze(
     .map(([id]) => id),
 );
 
-export function cloneArray(value) {
+export function cloneArray<T>(value: readonly T[] | T[] | unknown): T[] {
   return Array.isArray(value) ? [...value] : [];
 }
 
-export function cloneRoleAgents(roleAgents = ROLE_AGENT_FALLBACK) {
+export function cloneRoleAgents(roleAgents: Readonly<Record<string, readonly string[]>> = ROLE_AGENT_FALLBACK): Record<string, string[]> {
   return Object.fromEntries(Object.entries(roleAgents).map(([role, agents]) => [role, cloneArray(agents)]));
 }
 
-export function cloneAgentTierFallback() {
+export function cloneAgentTierFallback(): Array<{
+  id: string;
+  runtime: AgentRuntime;
+  role: RoleName;
+  tier: CodingTier | NonCodingTier;
+}> {
   return DEFAULT_AGENT_TIER_FALLBACK.map((agent) => ({ ...agent }));
 }
 
-export function normalizeRole(role) {
+export function normalizeRole(role: unknown): RoleName | null {
   const value = String(role || '').trim().toLowerCase();
-  return ROLE_ALIASES[value] || null;
+  return ROLE_ALIASES[value] ?? null;
 }
 
-export function normalizeRoleTag(role) {
+export function normalizeRoleTag(role: unknown): string {
   const value = String(role || '').trim().toLowerCase();
-  return ROLE_TAG_ALIASES[value] || value;
+  return ROLE_TAG_ALIASES[value] ?? value;
 }
 
-export function inferRoleByAgentId(agentId) {
+export function inferRoleByAgentId(agentId: unknown): RoleName | null {
   const id = String(agentId || '').trim().toLowerCase();
   if (!id || id === 'main') return null;
   if (CODING_TIER_BY_AGENT_ID[id]) return 'coding';
@@ -167,18 +187,20 @@ export function inferRoleByAgentId(agentId) {
   return null;
 }
 
-export function inferTierByAgentId(agentId) {
-  return CODING_TIER_BY_AGENT_ID[String(agentId || '').trim()] || null;
+export function inferTierByAgentId(agentId: unknown): CodingTier | null {
+  return CODING_TIER_BY_AGENT_ID[String(agentId || '').trim()] ?? null;
 }
 
-export function buildRoleTaskMapFromRoleAgents(roleAgents) {
-  const taskMap = {};
-  const allAgents = new Set();
+export function buildRoleTaskMapFromRoleAgents(
+  roleAgents: Readonly<Record<string, readonly string[]>> | null = ROLE_AGENT_FALLBACK,
+): Record<string, string[]> {
+  const taskMap: Record<string, string[]> = {};
+  const allAgents = new Set<string>();
 
   for (const [role, agents] of Object.entries(roleAgents || {})) {
     if (!Array.isArray(agents) || agents.length === 0) continue;
     agents.forEach((id) => allAgents.add(id));
-    const taskTypes = ROLE_TASK_TYPES[role] || [];
+    const taskTypes = ROLE_TASK_TYPES[role as RoleName] ?? [];
     for (const taskType of taskTypes) {
       if (!taskMap[taskType]) taskMap[taskType] = [];
       taskMap[taskType].push(...agents);
@@ -189,8 +211,10 @@ export function buildRoleTaskMapFromRoleAgents(roleAgents) {
   return taskMap;
 }
 
-export function buildTaskRoleMappingFromRoleTags(roleTagTaskTypes = ROLE_TAG_TASK_TYPES) {
-  const mapping = {};
+export function buildTaskRoleMappingFromRoleTags(
+  roleTagTaskTypes: Readonly<Record<string, readonly string[]>> | null = ROLE_TAG_TASK_TYPES,
+): Record<string, string[]> {
+  const mapping: Record<string, string[]> = {};
   for (const [roleTag, taskTypes] of Object.entries(roleTagTaskTypes || {})) {
     for (const taskType of taskTypes || []) {
       if (!mapping[taskType]) mapping[taskType] = [];
@@ -200,6 +224,6 @@ export function buildTaskRoleMappingFromRoleTags(roleTagTaskTypes = ROLE_TAG_TAS
   return mapping;
 }
 
-export function getValidRoles() {
+export function getValidRoles(): Set<string> {
   return new Set(Object.keys(ROLE_AGENT_FALLBACK));
 }

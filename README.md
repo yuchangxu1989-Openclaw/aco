@@ -1,496 +1,103 @@
-# ACO — Agent Coordination & Orchestration
+# ACO
 
-**The runtime governance engine for AI Agent teams.**
+> ACO is an AI agent operations orchestration framework that keeps dispatch, guardrails, task state, and recovery under deterministic control.
 
-ACO and SEVO together build an open-source, programmable, self-evolving governance kernel for AI Agent teams. The thesis is simple: an Agent system you can trust with production work treats governance as a first-class capability — equal in weight to construction, and designed as one integrated piece with it, not bolted on afterward.
+[![npm version](https://img.shields.io/npm/v/%40self-evolving-harness%2Faco.svg)](https://www.npmjs.com/package/@self-evolving-harness/aco)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
+[![Node >=18](https://img.shields.io/badge/node-%3E%3D18-339933.svg)](./package.json)
 
-CrewAI, AutoGen, LangGraph, and MetaGPT solve **"let agents start working."** ACO solves **"keep agents from losing control, drifting off-spec, or stalling out across long-horizon operation — and force every run to converge to a real, delivered result."**
+ACO gives AI agent teams an operating layer, not just a prompt loop. It routes work to the right agent tier, enforces L2 plugin guards before bad runs start, keeps task state visible on a live board, and recovers from stalls, zombies, and hollow completions before they become expensive failures.
 
-**12 L2 plugins. 70+ deterministic rules. 16-way concurrent dispatch. Automatic dead-task cleanup.**
+## Quick Start
 
-ACO turns multi-agent work from "agents can run" into "agents run under deterministic control." Orchestration, L2 guardrails, audit trails, failure recovery, and self-evolving operating discipline ship as one OpenClaw extension suite — at the runtime control plane, where rules cannot be diluted by long context or skipped by tired models.
-
----
-
-## Why ACO exists
-
-LLMs are powerful executors. They are weak governors.
-
-A multi-agent system fails in boring, expensive, repeatable ways:
-
-- The wrong agent takes the job.
-- A coding agent reviews its own code.
-- A long task blocks the main session, and user messages disappear.
-- A spawned task stalls for 40 minutes with no useful output.
-- A model says “done” after producing no file, no evidence, and no result.
-- A research task hits anti-bot protection and quietly skips the source.
-- A user asks “who changed this?” and the agent answers from memory instead of checking logs.
-- A kill command wipes a useful partial result because nobody scanned the impact first.
-- A completion event fires, but the human never gets a clean IM summary.
-
-Prompt rules are not enough. Long contexts dilute them. Tired models skip them. Different agents interpret them differently.
-
-ACO moves the critical rules down into the runtime control plane: deterministic checks, plugin-level interception, auditable decisions, and automatic recovery.
-
----
-
-## What ACO controls
-
-ACO is the control layer for OpenClaw-based agent teams.
-
-It governs the full lifecycle:
-
-1. **Intent intake** — understand task type, risk, role, and expected output.
-2. **Dispatch** — select the right agent, timeout, label, and concurrency lane.
-3. **Execution** — protect main session responsiveness and detect blocking behavior.
-4. **Monitoring** — watch running tasks, stale tasks, dead tasks, and hollow completions.
-5. **Recovery** — re-dispatch, escalate, split, or block unsafe continuation.
-6. **Closure** — enforce audit, notification, evidence, and human-readable summary.
-7. **Evolution** — turn repeated failures into stronger rules.
-
-The result is simple: agents keep their creative power, and the system gains operational discipline.
-
----
-
-## Core capabilities
-
-### 1. Dispatch Guard / 派发守卫
-
-Validates every dispatch before an agent starts work.
-
-- Checks whether the target agent exists in the live OpenClaw configuration.
-- Blocks same-agent concurrent execution.
-- Enforces role-to-task matching.
-- Uses LLM semantic classification ahead of keyword heuristics for task-type judgment; keywords can support routing, but they are no longer the first source of truth.
-- Verifies explicit `agentId` choices still match the task type, so a forced assignment cannot bypass role discipline.
-- Strips invalid runtime overrides.
-- Injects README quality rules when documentation tasks are detected.
-- Blocks SEVO pipeline bypass when the pipeline owns the task.
-- Enforces “no development without spec alignment” for coding work.
-- Applies the T1 health-scan mandatory rule only to coding-class tasks, so operational health checks do not get blocked by a coding-only gate.
-- Pre-checks task impact scope before spawn and requires the prompt to declare the intended file or artifact domain.
-
-This is the front door of the system. Role-matching is owned here; the old standalone `aco-role-matching-guard-fr` plugin is no longer part of the extension suite.
-
-### 2. Run Watchdog / 运行看门狗
-
-Keeps running tasks from turning into silent failures.
-
-- Detects stale tasks.
-- Cleans zombie sessions.
-- Tracks timeout discipline.
-- Marks orphaned running board entries as failed after a kill, so capacity and task state stay consistent.
-- Prevents “it is still running” from becoming an excuse for no result.
-
-Dead tasks get cleaned. Stuck work gets surfaced. Capacity returns to the pool.
-
-### 3. Async Discipline Guard / 主会话异步纪律守卫
-
-Protects the main conversation from blocking work.
-
-- Blocks long polling in the main session.
-- Blocks wait loops that should be push-based.
-- Pushes long work into subagents or ACP agents.
-- Keeps the human-facing channel responsive.
-
-The main session stays free to receive the next user message.
-
-### 4. Notify Guard / 完成通知守卫
-
-Makes completion visible to the human.
-
-- Requires a clean IM summary after completion events.
-- Injects an audit reminder after development completion, so SEVO handoff to independent review is not skipped.
-- Blocks closure when the user-facing notification is missing.
-- Supports delivery discipline for Feishu/Lark-style workflows.
-
-A task is not closed until the user actually receives the result.
-
-### 5. Objective Fact Guard / 客观事实守卫
-
-Stops agents from answering operational questions from memory.
-
-- Forces live checks for task state, files, config, service status, resources, and Git state.
-- Prefers current evidence over compressed session memory.
-- Reduces false claims caused by stale context.
-
-Facts come from files, configs, logs, commands, and current state.
-
-### 6. Doctor Guard / Doctor 安全守卫
-
-Protects the host from unsafe auto-fix behavior.
-
-- Blocks `openclaw doctor --fix` and equivalent dangerous forms.
-- Enforces read-only diagnosis first.
-- Requires manual repair and a clean doctor result before restart discussion.
-
-Health checks stay observable and reversible.
-
-### 7. Closure Guard / 闭环守卫
-
-Prevents vague endings.
-
-- Requires clear done / not done / blocked status.
-- Pushes evidence into the final report.
-- Catches incomplete task closure.
-
-No “looks good” endings. The system needs a real conclusion.
-
-### 8. Output Humanizer Guard / 输出人话守卫
-
-Keeps user-facing output direct and readable.
-
-- Blocks mechanical AI phrasing.
-- Encourages short, human summaries.
-- Blocks overstepping language that assigns work back to the user when the agent should close the loop itself.
-- Reduces technical leakage in final reports.
-
-The user gets conclusions, not internal machinery.
-
-### 9. Research Anti-Crawl Guard / 调研反爬守卫
-
-Makes research tasks resilient instead of fragile.
-
-- Requires fallback paths when a source blocks scraping.
-- Prefers public APIs first.
-- Supports third-party data services as a second path.
-- Uses real-browser capture as the final fallback.
-
-“Blocked by anti-bot” is a routing condition, not a valid stopping point.
-
-### 10. Browser Session Lease / 浏览器会话租约
-
-Controls scarce browser resources.
-
-- Coordinates persistent browser usage.
-- Prevents unsafe session collisions.
-- Keeps browser automation predictable under parallel work.
-
-Browser state becomes a managed resource.
-
-### 11. Session Context Recovery / 会话上下文恢复
-
-Reduces damage from compressed or lost context.
-
-- Helps recover task-critical context.
-- Keeps agents aligned after session truncation.
-- Supports stronger continuity across long-running work.
-
-The system assumes memory can fail and designs around it.
-
-### 12. Spec Challenge Guard / Spec 挑战守卫
-
-Raises the quality bar before implementation.
-
-- Forces first-principles challenge on specs and architecture.
-- Catches unverified assumptions.
-- Pushes ambiguous requirements back into clarification or spec updates.
-
-It protects the product from plausible but weak requirements.
-
-### 13. Concurrency Efficiency Guard / 并发效率守卫
-
-Keeps agent capacity active.
-
-- Detects idle capacity while work remains.
-- Encourages batch dispatch when multiple agents are available.
-- Supports up to 16 concurrent execution lanes under configured limits.
-
-Expensive agent capacity should not sit idle while queued work exists.
-
----
-
-## Deterministic rule system
-
-ACO ships with 70+ deterministic interception and guidance rules across dispatch, execution, notification, research, evidence checks, doctor safety, closure, and context recovery.
-
-Examples:
-
-- Block same-agent concurrent work.
-- Block invalid agent IDs.
-- Block main-session long builds and installs.
-- Block dangerous doctor auto-fix commands.
-- Require live task-board reads before reporting task state.
-- Require independent audit after development.
-- Require research reports to be written to files.
-- Require anti-crawl fallback paths.
-- Require Feishu/Lark summary delivery after completion.
-- Require spec challenge before implementation.
-- Require FR-K22 Think Before Coding before coding starts.
-- Require FR-K23 Goal-Driven Execution with explicit success criteria and post-checks.
-- Require FR-K24 independent repository synchronization through the standard sync script when project changes must be mirrored.
-- Require kill-impact scanning before destructive intervention.
-
-These are runtime rules. They do not rely on model goodwill.
-
----
-
-## How ACO differs from other agent frameworks
-
-### CrewAI
-
-CrewAI is strong at role-based collaboration and task flow definition. ACO focuses on runtime control: blocking unsafe dispatch, enforcing audit separation, cleaning dead tasks, and proving closure.
-
-Use CrewAI when you need a clean agent-team abstraction. Use ACO when you need the team to stay operational under failure.
-
-### AutoGen
-
-AutoGen is strong at agent conversations and flexible interaction patterns. ACO focuses on operational discipline: main-session protection, deterministic routing, timeout enforcement, evidence gates, and notification gates.
-
-Use AutoGen when you want agents to talk. Use ACO when you need agents to finish safely and visibly.
-
-### LangGraph
-
-LangGraph is strong at graph-based workflows and state transitions. ACO focuses on the control plane around real agent operations: who can run, how many can run, when to stop, when to escalate, and when to block.
-
-Use LangGraph when the workflow graph is the product. Use ACO when live agent governance is the product.
-
-### MetaGPT
-
-MetaGPT is strong at software-team simulation. ACO focuses on deterministic guardrails for real multi-agent execution: dispatch rules, watchdogs, closure checks, anti-crawl discipline, and self-evolving operational rules.
-
-Use MetaGPT when you want a structured AI company metaphor. Use ACO when you want production-grade agent governance.
-
----
-
-## Architecture
-
-```mermaid
-flowchart TD
-    U[User / Human Operator] --> M[OpenClaw Main Session]
-    M --> ACO[ACO L2 Control Plane]
-
-    ACO --> DG[Dispatch Guard]
-    ACO --> AD[Async Discipline Guard]
-    ACO --> RW[Run Watchdog]
-    ACO --> NG[Notify Guard]
-    ACO --> FG[Objective Fact Guard]
-    ACO --> SG[Spec Challenge Guard]
-    ACO --> RG[Research Anti-Crawl Guard]
-    ACO --> CG[Closure Guard]
-
-    DG --> Q[Task Board]
-    RW --> Q
-    NG --> IM[Feishu / IM Summary]
-    FG --> E[Files / Config / Logs / Git / Services]
-
-    Q --> P[Agent Pool]
-    P --> C1[Coder Agents]
-    P --> C2[Audit Agents]
-    P --> C3[PM / Architect / UX Agents]
-    P --> C4[Research Agents]
-
-    C1 --> O[Artifacts]
-    C2 --> O
-    C3 --> O
-    C4 --> O
-    O --> CG
-    CG --> U
-```
-
-The model proposes actions. ACO decides whether the runtime should allow them.
-
----
-
-## Quick start
-
-ACO is designed for OpenClaw extension deployment.
-
-### 1. Install the package
+### 1. Install
 
 ```bash
 npm install -g @self-evolving-harness/aco
 ```
 
-### 2. Copy ACO extensions into OpenClaw
-
-```bash
-mkdir -p /root/.openclaw/extensions
-cp -R ./extensions/aco-* /root/.openclaw/extensions/
-```
-
-If you installed from npm and want the packaged extension assets, locate the package first:
-
-```bash
-npm root -g
-```
-
-Then copy the extension directories from the package location into:
-
-```bash
-/root/.openclaw/extensions/
-```
-
-### 3. Initialize config
+### 2. Initialize rules
 
 ```bash
 aco init
 ```
 
-This creates or updates ACO configuration files and discovers the local OpenClaw agent pool.
+This detects your OpenClaw environment and generates the initial ACO ruleset in `~/.openclaw/extensions/aco-rules/rules.json`.
 
-### 4. Run a read-only health check
-
-```bash
-openclaw doctor
-aco doctor
-```
-
-ACO intentionally avoids unsafe automatic repair. Diagnose first, fix manually, verify again.
-
-### 5. Restart Gateway only after checks are clean
-
-Use the normal OpenClaw gateway command after configuration is valid:
+### 3. Run the local walkthrough
 
 ```bash
-openclaw gateway restart
+aco demo
 ```
 
----
+`aco demo` runs a zero-provider orchestration walkthrough and prints the full lifecycle: agent registration, task submission, rule interception, dispatch, retry, and completion summary.
 
-## Configuration example
+## What ACO Controls
 
-```json
-{
-  "level": 2,
-  "agents": [
-    {
-      "id": "cc",
-      "role": "coder",
-      "tier": "T1",
-      "runtimeType": "acp"
-    },
-    {
-      "id": "audit-01",
-      "role": "auditor",
-      "tier": "T2",
-      "runtimeType": "subagent"
-    },
-    {
-      "id": "pm-01",
-      "role": "pm",
-      "tier": "T3",
-      "runtimeType": "subagent"
-    }
-  ],
-  "concurrency": {
-    "globalMax": 16,
-    "perType": {
-      "acp": 6,
-      "subagent": 10
-    }
-  },
-  "tiers": {
-    "defaultTier": "T2",
-    "autoEscalate": true,
-    "maxEscalations": 3
-  },
-  "substantiveFailure": {
-    "minOutputTokens": 3000,
-    "requireFileOutput": true
-  },
-  "chains": [
-    {
-      "id": "dev-audit-chain",
-      "trigger": "code:*",
-      "steps": [
-        {
-          "action": "audit",
-          "agentRole": "auditor",
-          "timeoutSeconds": 600
-        }
-      ]
-    }
-  ]
-}
-```
+- Deterministic dispatch decisions before an agent starts work.
+- Runtime guardrails that do not disappear inside long prompts.
+- Visible task-state tracking for queued, running, failed, and completed work.
+- Failure recovery paths for stale tasks, zombie sessions, and low-substance completions.
 
-Minimal config also works. ACO can start from detected OpenClaw state and unlock stricter controls as the agent pool grows.
+## Core Concepts
 
----
+### Plugin system
 
-## CLI surface
+ACO uses runtime plugins as L2 deterministic guards. Instead of trusting every agent to remember every rule, ACO intercepts execution at the control plane with plugins such as dispatch guard, objective-fact guard, output humanizer guard, notify guard, and doctor guard.
+
+### Agent routing
+
+ACO routes work by task type, role fit, tier, timeout discipline, and current capacity. The goal is simple: coding work goes to coding lanes, audits stay independent, and one busy agent does not quietly become a global bottleneck.
+
+### Task board
+
+ACO keeps task state in a board that powers visibility and recovery. The board is the operational source for queued, running, failed, cancelled, and succeeded work, and it backs commands such as `aco task` and `aco board`.
+
+### Watchdog
+
+ACO treats silent failure as a product bug. Its watchdog path detects stale runs, zombie sessions, timeout drift, and orphaned capacity so the system can surface the problem, clean state, and free the lane for the next task.
+
+## Example
+
+Start with the minimal plugin in `examples/hello-plugin/`.
+
+It hooks the `before_prompt_build` event, loads as a real ACO plugin, and gives you a small end-to-end example to copy when building your own guards.
 
 ```bash
-aco init          # Detect OpenClaw environment and create config
-aco dispatch      # Dispatch a task through the rule system
-aco task          # List, cancel, retry, and inspect tasks
-aco board         # View the live task board
-aco pool          # Inspect and sync the agent pool
-aco rule          # List and manage dispatch rules
-aco chain         # Manage workflow chains
-aco stats         # Inspect capacity and throughput
-aco audit         # Query decisions and guard events
-aco config        # Inspect and validate config
-aco notify        # Check notification routes
-aco health        # Health check
-aco doctor        # Health check alias
+node -e "import('./examples/hello-plugin/index.js').then(m => console.log('OK:', m.default.id))"
 ```
 
----
+Expected output:
 
-## Operational model
+```text
+OK: aco-hello-plugin
+```
 
-ACO uses layered control.
+For installation and wiring details, see `examples/hello-plugin/README.md`.
 
-- **L0 — Host layer**: systemd, cron, process cleanup, service recovery.
-- **L1 — OpenClaw Gateway**: routing, authentication, event dispatch.
-- **L2 — ACO plugins**: deterministic interception, blocking, warning, rewriting, and evidence enforcement.
-- **L3 — Hooks and chains**: completion-triggered audit, continuation, notification, and recovery.
-- **L4 — Agent harness**: role-specific runtime configuration.
-- **L5 — Config**: agent pool, tiers, concurrency, chains, and rule thresholds.
-- **L6 — Prompt discipline**: human-readable operating rules for models.
+## When to Use ACO
 
-ACO puts critical controls at L2 and L3 because those layers are harder for a model to forget.
+| Use ACO when | ACO is not for |
+| --- | --- |
+| You need deterministic controls around multi-agent runtime behavior. | You only want a single prompt runner with no routing or recovery layer. |
+| You want task state, retries, and watchdog behavior to stay visible. | You are looking for a hosted SaaS control plane out of the box. |
+| You need plugin-level guardrails that survive long context windows. | You want agents to self-govern purely through prompt instructions. |
+| You care about operational closure, not just generated text. | You do not need audits, task boards, or timeout discipline. |
 
-Legacy task-board enqueue compatibility goes through `scripts/local-subagent-board.js`; the board bridge is not located at the workspace root. Independent repository mirroring goes through `scripts/sync-independent-repos.sh`, whose checks distinguish real drift from generated-file and ignore-rule noise to avoid false-positive sync failures.
+## CLI Surface
 
----
+- `aco init` generates the initial ruleset for your environment.
+- `aco demo` runs a deterministic walkthrough with no provider dependency.
+- `aco dispatch` sends work to a discovered or explicit agent.
+- `aco task` inspects, retries, cancels, and tracks task state.
+- `aco health` checks config, data paths, audit availability, and agent health summaries.
 
-## Designed for real failure
+## Docs
 
-ACO assumes the following are normal:
-
-- Agents will forget instructions.
-- Long-running tasks will stall.
-- Model output will sometimes be polite and empty.
-- Memory will be compressed and lose details.
-- Browser sessions will collide.
-- Research targets will block automation.
-- Users will care about the result, not the internal task label.
-
-The system is built around those assumptions.
-
----
-
-## Roadmap
-
-### V2 deterministic blocking
-
-- Expand rule coverage across tool calls, file writes, browser operations, and gateway lifecycle actions.
-- Add stronger typed rule packs for coding, research, documentation, release, and incident response.
-- Improve explainability for every block decision.
-
-### Automatic dispatch
-
-- Turn task-board backlog and idle-agent capacity into automatic dispatch plans.
-- Add safer queue shaping for 16-way concurrent execution.
-- Improve split-and-escalate logic for large documents, audits, and research tasks.
-
-### Open-source generalization
-
-- Remove host-specific assumptions from extension packaging.
-- Provide clean install profiles for small teams, solo builders, and production OpenClaw deployments.
-- Ship portable examples that work outside the original development workspace.
-
-### Self-evolution
-
-- Convert repeated bad cases into new deterministic rules.
-- Promote proven local rules into reusable rule packs.
-- Keep the control plane improving as agents and workflows evolve.
-
----
+- Product requirements: `docs/product-requirements.md`
+- Architecture: `docs/architecture.md`
+- Example plugin: `examples/hello-plugin/README.md`
 
 ## License
 
-MIT
+MIT. See `LICENSE`.
