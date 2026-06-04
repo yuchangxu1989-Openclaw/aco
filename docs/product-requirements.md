@@ -363,6 +363,7 @@ ACO 从 OpenClaw 配置动态读取 Agent 列表和角色映射,禁止硬编码 
 - AC4:AGENT_TIER 支持从配置显式声明或根据 runtime.type 自动推断(acp 类型推断为 T1-T3,subagent 类型推断为 T4),显式声明优先于自动推断。 验收验证：审计时按本条描述执行或复现对应操作，记录结构化结果 `{ acId, status, evidence, reason }`；`status` 必须为 `pass`，`evidence` 必须包含可观测输出（文件路径、CLI 输出、API 响应、页面截图、审计事件或状态字段之一），缺少证据、字段值不符或无法复现均判定为 `fail`。
 - AC5:配置变更后自动刷新角色映射和梯队信息(优先利用 OpenClaw 的 config watcher 机制,也可使用 ACO 自身的 FR-H02 配置热加载能力),无需重启服务。 验收验证：审计时按本条描述执行或复现对应操作，记录结构化结果 `{ acId, status, evidence, reason }`；`status` 必须为 `pass`，`evidence` 必须包含可观测输出（文件路径、CLI 输出、API 响应、页面截图、审计事件或状态字段之一），缺少证据、字段值不符或无法复现均判定为 `fail`。
 - AC6:动态构建的映射关系写入启动日志,便于排查角色匹配问题。 验收验证：审计时按本条描述执行或复现对应操作，记录结构化结果 `{ acId, status, evidence, reason }`；`status` 必须为 `pass`，`evidence` 必须包含可观测输出（文件路径、CLI 输出、API 响应、页面截图、审计事件或状态字段之一），缺少证据、字段值不符或无法复现均判定为 `fail`。
+- AC7:面向外部用户或第三方维护者的示例文档、README 片段、CLI 示例、配置示例和任务 prompt 示例必须可移植,不得把机器绝对路径(例如 `/root/.openclaw/...`、`/home/<user>/.openclaw/...`、个人 workspace 绝对路径)写成用户应复制执行的固定路径;需要表达 OpenClaw 安装根、workspace 根或项目根时,必须使用 `$OPENCLAW_HOME`、`$WORKSPACE_ROOT`、`$PROJECT_ROOT` 等占位符或相对路径。若示例确需展示一次性诊断输出中的真实本机路径,必须明确标注为不可复制的诊断样例并对个人路径做占位化。 验收验证：审计时按本条描述执行或复现对应操作，记录结构化结果 `{ acId, status, evidence, reason }`；`status` 必须为 `pass`，`evidence` 必须包含文档片段、示例命令或配置示例的可观测输出之一；若面向用户复制的示例仍包含 `/root/.openclaw`、`~/.openclaw` 或个人 workspace 绝对路径且未标注为诊断样例,则判定为 `fail`。
 
 ##### FR-B07:LLM 任务分类器语义覆盖
 
@@ -1972,4 +1973,3 @@ ACO 必须由 L2 插件在任务派发、completion event 和 watchdog 对账时
 - AC3:watchdog 至少每 60 秒执行一次 `TASKS.md` 与看板 JSON 对账；发现看板已终态但 `TASKS.md` 仍在“进行中”的条目时自动清理或迁移，发现 `TASKS.md` 存在看板中不存在且无终态证据的孤儿条目时标记为“需核查”并写入审计事件。
 - AC4:同步逻辑必须以看板 JSON 为状态真相源，以 `TASKS.md` 为用户可读投影；主会话 prompt 注入提醒只能作为补充引导，不得成为唯一同步路径。验收时关闭或缺失 prompt 提醒后，派发与 completion 同步仍必须通过。
 - AC5:每次程序化同步必须写入审计事件，至少包含 timestamp、sourceEvent(dispatch / completion / watchdog)、taskId、sessionId、label、previousTasksState、nextTasksState、boardStatus 和 result(success / needs_review / failed)，便于追溯同步依据。
-
