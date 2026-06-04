@@ -22,6 +22,7 @@ import { ruleCommand } from './commands/rule.js';
 import { detectEnvironment, initCommand } from './commands/init.js';
 import { dispatchCommand } from './commands/dispatch.js';
 import { demoCommand } from './commands/demo.js';
+import { resolveAcoDataDir } from './paths.js';
 
 // --- Arg parsing helpers ---
 
@@ -54,7 +55,7 @@ function getPositionals(argv: string[]): string[] {
 // --- Paths ---
 
 function getDataDir(): string {
-  return process.env.ACO_DATA_DIR ?? join(process.cwd(), '.aco');
+  return resolveAcoDataDir();
 }
 
 function getBoardPath(): string {

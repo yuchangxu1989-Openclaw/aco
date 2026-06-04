@@ -29,12 +29,19 @@ describe('CLI main', () => {
     const code = await main(['--help']);
     expect(code).toBe(0);
     expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('Commands:'));
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('demo'));
   });
 
   it('returns error for unknown command', async () => {
     const code = await main(['unknown']);
     expect(code).toBe(1);
     expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('Unknown command'));
+  });
+
+  it('demo --help is a registered CLI command', async () => {
+    const code = await main(['demo', '--help']);
+    expect(code).toBe(0);
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('aco demo'));
   });
 
   it('chain --help shows chain help', async () => {

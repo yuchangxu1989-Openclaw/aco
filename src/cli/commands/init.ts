@@ -7,11 +7,12 @@
 import { readFile, writeFile, mkdir, access } from 'node:fs/promises';
 import { join, resolve, dirname, extname } from 'node:path';
 import { homedir } from 'node:os';
-import { hasFlag } from '../parse-args.js';
+import { getFlagValue, hasFlag } from '../parse-args.js';
 import { createEventBus, createNotificationManager, loadFileConfig, fileExists as sharedFileExists } from './shared.js';
 import type { AcoFileConfig, NotificationChannelFileEntry } from '../../config/config-schema.js';
-import { runAllGenerators, listGenerators } from '../../generators/index.js';
+import { runAllGenerators, listGenerators, validateGenerators } from '../../generators/index.js';
 import { inferRoleByAgentId, inferTierByAgentId } from '../../shared/routing-registry.js';
+import { resolveAcoDataDir } from '../paths.js';
 
 const HELP = `
 aco init — 初始化 ACO L2 调度规则
@@ -24,6 +25,7 @@ Options:
   --list          列出所有已注册的 generator
   --dry-run       只输出将要生成的配置，不写入文件
   --force         覆盖已有规则配置文件
+  --data-dir <p>  设置 ACO 数据目录（也可用 ACO_DATA_DIR）
 
 Description:
   自动检测 OpenClaw 环境并生成 ~/.openclaw/extensions/aco-rules/rules.json。
@@ -34,6 +36,7 @@ Description:
 
 Examples:
   aco init
+  aco init --data-dir ~/.openclaw/aco-data
   aco init --dry-run
   aco init --force
 `.trim();
@@ -229,7 +232,7 @@ export async function detectEnvironment(): Promise<DetectedEnvironment> {
         openclawConfigPath: p,
         openclawHome,
         rulesPath: join(openclawHome, 'extensions', 'aco-rules', 'rules.json'),
-        dataDir: join(openclawHome, 'aco-data'),
+        dataDir: resolveAcoDataDir(p),
         agents,
         plugins,
         pluginIds,
@@ -249,7 +252,7 @@ export async function detectEnvironment(): Promise<DetectedEnvironment> {
     type: 'standalone',
     openclawHome,
     rulesPath: join(openclawHome, 'extensions', 'aco-rules', 'rules.json'),
-    dataDir: join(openclawHome, 'aco-data'),
+    dataDir: resolveAcoDataDir(),
     agents: [],
     plugins: [],
     pluginIds: new Set(),
@@ -456,6 +459,7 @@ function printReport(env: DetectedEnvironment, rulesFile: RulesFile, dryRun: boo
   console.log(`Agents discovered: ${env.agentCount} (${env.agentsWithRoles} with role hints)`);
   console.log(`Detected plugins: ${plugins.length > 0 ? plugins.join(', ') : 'none'}`);
   console.log(`Rules path: ${env.rulesPath}`);
+  console.log(`Data directory: ${env.dataDir}`);
   console.log('');
 
   if (dryRun) {
@@ -479,6 +483,14 @@ function printReport(env: DetectedEnvironment, rulesFile: RulesFile, dryRun: boo
     console.log(`Data directories ready: ${env.dataDir}`);
   }
   console.log('Next: add the aco-rules extension to your host only after reviewing this file. aco init did not modify openclaw.json.');
+}
+
+function withDataDir(env: DetectedEnvironment, dataDir?: string): DetectedEnvironment {
+  if (!dataDir) return env;
+  return {
+    ...env,
+    dataDir: resolve(dataDir),
+  };
 }
 
 
@@ -525,20 +537,32 @@ export async function initCommand(args: string[]): Promise<number> {
 
   const force = hasFlag(args, 'force');
   const dryRun = hasFlag(args, 'dry-run');
-  const env = await detectEnvironment();
+  const env = withDataDir(await detectEnvironment(), getFlagValue(args, 'data-dir'));
   const rulesFile = generateRulesFile(env);
+  const acoConfig = await loadAcoConfig();
 
   if (dryRun) {
     printReport(env, rulesFile, true);
     return 0;
   }
 
+  try {
+    await validateGenerators(env, acoConfig);
+  } catch (err) {
+    console.error((err as Error).message);
+    return 1;
+  }
+
   await ensureDataDirs(env, dryRun);
   const writeStatus = await writeJsonIfNeeded(env.rulesPath, rulesFile, force, 'Rules config');
 
   // FR-J01: Run all registered generators (declarative plugin registration)
-  const acoConfig = await loadAcoConfig();
-  await runAllGenerators(env, acoConfig, force);
+  try {
+    await runAllGenerators(env, acoConfig, force);
+  } catch (err) {
+    console.error((err as Error).message);
+    return 1;
+  }
 
   printReport(env, rulesFile, false, writeStatus);
 

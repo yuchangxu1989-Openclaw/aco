@@ -32,6 +32,7 @@ export interface Generator {
   name: string;
   description: string;
   priority?: number;
+  validate?(env: GeneratorEnv, config: AcoFileConfig | null): Promise<void>;
   generate(env: GeneratorEnv, config: AcoFileConfig | null, force: boolean): Promise<void>;
 }
 
@@ -69,6 +70,19 @@ export async function runAllGenerators(
   const generators = getGenerators();
   for (const gen of generators) {
     await gen.generate(env, config, force);
+  }
+}
+
+/**
+ * Validate all generators before init writes files.
+ */
+export async function validateGenerators(
+  env: GeneratorEnv,
+  config: AcoFileConfig | null,
+): Promise<void> {
+  const generators = getGenerators();
+  for (const gen of generators) {
+    await gen.validate?.(env, config);
   }
 }
 

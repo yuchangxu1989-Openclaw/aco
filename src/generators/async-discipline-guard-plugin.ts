@@ -131,7 +131,8 @@ export default {
 
     function isConfiguredModel(config, provider, model) {
       const models = config?.models?.providers?.[provider]?.models;
-      return Array.isArray(models) && models.some(m => (typeof m === 'string' ? m : m?.id) === model);
+      if (Array.isArray(models)) return models.some(m => (typeof m === 'string' ? m : m?.id) === model);
+      return Boolean(models && typeof models === 'object' && Object.prototype.hasOwnProperty.call(models, model));
     }
 
     function extractSessionKey(event, context) {
@@ -385,18 +386,45 @@ function providerHasModel(openclawConfig: Record<string, unknown>, provider: str
   const providers = (openclawConfig.models as Record<string, unknown> | undefined)?.providers as Record<string, unknown> | undefined;
   const entry = providers?.[provider] as Record<string, unknown> | undefined;
   const models = entry?.models;
-  return Array.isArray(models) && models.some(item => (typeof item === 'string' ? item : (item as Record<string, unknown>)?.id) === model);
+  if (Array.isArray(models)) {
+    return models.some(item => (typeof item === 'string' ? item : (item as Record<string, unknown>)?.id) === model);
+  }
+  return Boolean(models && typeof models === 'object' && Object.prototype.hasOwnProperty.call(models, model));
 }
 
 async function assertLlmModelConfigured(env: GeneratorEnv, guardConfig: AcoFileConfig['asyncDisciplineGuard']): Promise<void> {
   const llm = guardConfig?.llmJudgement ?? DEFAULT_ASYNC_DISCIPLINE_CONFIG.llmJudgement;
   const provider = llm.provider ?? DEFAULT_ASYNC_DISCIPLINE_CONFIG.llmJudgement.provider;
   const model = llm.model ?? DEFAULT_ASYNC_DISCIPLINE_CONFIG.llmJudgement.model;
-  if (!env.openclawConfigPath) throw new Error('aco init cannot validate asyncDisciplineGuard.llmJudgement because openclaw.json was not detected.');
+  if (!env.openclawConfigPath) {
+    throw new Error(`aco init failed: OpenClaw config was not detected.
+Next steps:
+  1. If you use OpenClaw, set OPENCLAW_HOME to the directory that contains openclaw.json, then rerun aco init.
+  2. If you only want to see ACO behavior, run aco demo. It does not require OpenClaw, providers, or network access.
+  3. If you want init without the async discipline LLM guard, create aco.config.json with:
+     { "asyncDisciplineGuard": { "enabled": false } }`);
+  }
   const raw = await readFile(env.openclawConfigPath, 'utf-8');
   const openclawConfig = JSON.parse(raw) as Record<string, unknown>;
   if (!providerHasModel(openclawConfig, provider, model)) {
-    throw new Error(`aco init failed: asyncDisciplineGuard.llmJudgement model ${provider}/${model} is not present in openclaw.json models.providers. Configure provider/model first, then rerun aco init.`);
+    throw new Error(`aco init failed: asyncDisciplineGuard.llmJudgement model ${provider}/${model} is not present in ${env.openclawConfigPath}.
+Next steps:
+  1. Add the provider/model to openclaw.json under models.providers.${provider}.models, then rerun aco init.
+     Example:
+     {
+       "models": {
+         "providers": {
+           "${provider}": {
+             "models": ["${model}"]
+           }
+         }
+       }
+     }
+  2. Or choose an existing model in aco.config.json:
+     { "asyncDisciplineGuard": { "llmJudgement": { "provider": "<provider>", "model": "<model>" } } }
+  3. Or disable this guard for first setup:
+     { "asyncDisciplineGuard": { "enabled": false } }
+  4. To see ACO without provider setup, run aco demo.`);
   }
 }
 
@@ -404,6 +432,11 @@ const asyncDisciplineGuardGenerator: Generator = {
   name: 'async-discipline-guard-plugin',
   description: 'Generates the FR-K01/K02/K03 async discipline guard Gateway plugin',
   priority: 60,
+  async validate(env: GeneratorEnv, config: AcoFileConfig | null): Promise<void> {
+    const guardConfig = config?.asyncDisciplineGuard ?? {};
+    if (guardConfig.enabled === false) return;
+    await assertLlmModelConfigured(env, guardConfig);
+  },
   async generate(env: GeneratorEnv, config: AcoFileConfig | null, force: boolean): Promise<void> {
     const guardConfig = config?.asyncDisciplineGuard ?? {};
     if (guardConfig.enabled === false) return;

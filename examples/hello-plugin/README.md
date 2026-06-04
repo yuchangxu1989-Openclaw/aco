@@ -11,7 +11,9 @@ Hooks into the `before_prompt_build` event and prints a greeting to the ACO log.
 Place the `hello-plugin/` folder (or a symlink to it) inside your ACO `extensions/` directory:
 
 ```bash
-ln -s "$PWD" /root/.openclaw/workspace/projects/aco/extensions/hello-plugin
+OPENCLAW_HOME="${OPENCLAW_HOME:-$HOME/.openclaw}"
+mkdir -p "$OPENCLAW_HOME/extensions"
+ln -s "$PWD" "$OPENCLAW_HOME/extensions/hello-plugin"
 ```
 
 Then add the plugin to your `openclaw.json` under `plugins.entries`:

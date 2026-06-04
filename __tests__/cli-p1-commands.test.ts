@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { writeFile, mkdir, rm } from 'node:fs/promises';
+import { readFile, writeFile, mkdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { main } from '../src/cli/cli.js';
 
@@ -253,6 +253,67 @@ describe('CLI P1 Commands', () => {
       out.restore();
       expect(code).toBe(0);
       expect(out.logs.join('\n')).toContain('aco init');
+      expect(out.logs.join('\n')).toContain('--data-dir');
+    });
+
+    it('uses --data-dir consistently in generated rules', async () => {
+      const openclawHome = join(TEST_DIR, 'openclaw-home');
+      const dataDir = join(TEST_DIR, 'custom-data');
+      await mkdir(openclawHome, { recursive: true });
+      await writeFile(join(openclawHome, 'openclaw.json'), JSON.stringify({
+        models: {
+          providers: {
+            'penguin-main': {
+              models: ['claude-opus-4-7'],
+            },
+          },
+        },
+      }));
+      await writeFile(join(TEST_DIR, 'aco.config.json'), JSON.stringify({
+        asyncDisciplineGuard: { enabled: false },
+      }));
+
+      const originalOpenclawHome = process.env.OPENCLAW_HOME;
+      const originalCwd = process.cwd();
+      process.env.OPENCLAW_HOME = openclawHome;
+      process.chdir(TEST_DIR);
+      const out = captureOutput();
+      const code = await main(['init', '--data-dir', dataDir, '--force']);
+      out.restore();
+      process.chdir(originalCwd);
+      if (originalOpenclawHome === undefined) delete process.env.OPENCLAW_HOME;
+      else process.env.OPENCLAW_HOME = originalOpenclawHome;
+
+      expect(code).toBe(0);
+      expect(out.logs.join('\n')).toContain(`Data directory: ${dataDir}`);
+      const rules = JSON.parse(await readFile(join(openclawHome, 'extensions', 'aco-rules', 'rules.json'), 'utf-8'));
+      const taskBoardRule = rules.rules.find((rule: { id: string }) => rule.id === 'task-board');
+      expect(taskBoardRule.config.sqlitePath).toBe(join(dataDir, 'aco.sqlite'));
+    });
+
+    it('returns guided error when OpenClaw config is missing', async () => {
+      const originalOpenclawHome = process.env.OPENCLAW_HOME;
+      const originalHome = process.env.HOME;
+      const originalCwd = process.cwd();
+      const emptyHome = join(TEST_DIR, 'empty-home');
+      process.env.HOME = emptyHome;
+      delete process.env.OPENCLAW_HOME;
+      process.chdir(TEST_DIR);
+      const out = captureOutput();
+      const code = await main(['init', '--force']);
+      out.restore();
+      process.chdir(originalCwd);
+      if (originalOpenclawHome === undefined) delete process.env.OPENCLAW_HOME;
+      else process.env.OPENCLAW_HOME = originalOpenclawHome;
+      if (originalHome === undefined) delete process.env.HOME;
+      else process.env.HOME = originalHome;
+
+      expect(code).toBe(1);
+      const errorText = out.errors.join('\n');
+      expect(errorText).toContain('OpenClaw config was not detected');
+      expect(errorText).toContain('Next steps:');
+      expect(errorText).toContain('aco demo');
+      await expect(readFile(join(emptyHome, '.openclaw', 'extensions', 'aco-rules', 'rules.json'), 'utf-8')).rejects.toThrow();
     });
   });
 });

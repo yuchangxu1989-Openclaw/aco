@@ -2,6 +2,9 @@
  * Tests for Async Discipline Guard Plugin Generator — FR-K01/K02/K03
  */
 
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { describe, expect, it } from 'vitest';
 import { generateAsyncDisciplineGuardPlugin } from './async-discipline-guard-plugin.js';
 import { getGenerators, listGenerators } from './index.js';
@@ -125,6 +128,11 @@ describe('generateAsyncDisciplineGuardPlugin', () => {
     expect(custom).toContain('/tmp/dispatch-guard-events.jsonl');
     expect(custom).toContain('custom-async-guard');
   });
+
+  it('generated plugin accepts object-style OpenClaw provider models', () => {
+    const generated = generateAsyncDisciplineGuardPlugin();
+    expect(generated).toContain('Object.prototype.hasOwnProperty.call(models, model)');
+  });
 });
 
 describe('async discipline generator registry', () => {
@@ -133,5 +141,36 @@ describe('async discipline generator registry', () => {
     const item = listGenerators().find(g => g.name === 'async-discipline-guard-plugin');
     expect(item).toBeDefined();
     expect(item?.description).toContain('async discipline');
+  });
+
+  it('accepts object-style models in OpenClaw config during init generation', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'aco-async-guard-'));
+    try {
+      const openclawConfigPath = join(dir, 'openclaw.json');
+      await writeFile(openclawConfigPath, JSON.stringify({
+        models: {
+          providers: {
+            'penguin-main': {
+              models: {
+                'claude-opus-4-7': {},
+              },
+            },
+          },
+        },
+      }));
+
+      const generator = getGenerators().find(g => g.name === 'async-discipline-guard-plugin');
+      await generator?.generate({
+        openclawHome: dir,
+        rulesPath: join(dir, 'extensions', 'aco-rules', 'rules.json'),
+        dataDir: join(dir, 'aco-data'),
+        openclawConfigPath,
+      }, {}, true);
+
+      const plugin = await readFile(join(dir, 'extensions', 'aco-async-discipline-guard', 'index.js'), 'utf-8');
+      expect(plugin).toContain('aco-async-discipline-guard');
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 });

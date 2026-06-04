@@ -7,7 +7,7 @@
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { hasFlag, getFlagValue } from '../parse-args.js';
-import { getDataDir, fileExists } from './shared.js';
+import { getConfigPath, fileExists } from './shared.js';
 import { OpenClawAdapter } from '../../adapter/openclaw-adapter.js';
 import type { OpenClawAdapterConfig } from '../../adapter/openclaw-adapter.js';
 
@@ -44,11 +44,11 @@ async function loadAdapterConfig(): Promise<OpenClawAdapterConfig> {
 
   // Try to read from aco.config.json
   const configPaths = [
+    getConfigPath(),
     join(process.cwd(), 'aco.config.json'),
-    join(getDataDir(), '..', 'aco.config.json'),
   ];
 
-  for (const p of configPaths) {
+  for (const p of [...new Set(configPaths)]) {
     if (await fileExists(p)) {
       try {
         const content = await readFile(p, 'utf-8');

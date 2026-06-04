@@ -4,6 +4,7 @@
 
 import { readFile, access } from 'node:fs/promises';
 import { resolve, join, extname } from 'node:path';
+import { resolveAcoDataDir } from '../paths.js';
 import { parse as parseYaml } from 'yaml';
 import { EventBus } from '../../event/event-bus.js';
 import { ConfigManager } from '../../config/config-manager.js';
@@ -14,7 +15,7 @@ import { getBuiltinTransports } from '../../notification/transports/index.js';
 import type { AcoFileConfig } from '../../config/config-schema.js';
 
 export function getDataDir(): string {
-  return process.env.ACO_DATA_DIR ?? resolve(process.cwd(), '.aco');
+  return resolveAcoDataDir();
 }
 
 export function getConfigPath(): string {
