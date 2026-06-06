@@ -1973,3 +1973,58 @@ ACO 必须由 L2 插件在任务派发、completion event 和 watchdog 对账时
 - AC3:watchdog 至少每 60 秒执行一次 `TASKS.md` 与看板 JSON 对账；发现看板已终态但 `TASKS.md` 仍在“进行中”的条目时自动清理或迁移，发现 `TASKS.md` 存在看板中不存在且无终态证据的孤儿条目时标记为“需核查”并写入审计事件。
 - AC4:同步逻辑必须以看板 JSON 为状态真相源，以 `TASKS.md` 为用户可读投影；主会话 prompt 注入提醒只能作为补充引导，不得成为唯一同步路径。验收时关闭或缺失 prompt 提醒后，派发与 completion 同步仍必须通过。
 - AC5:每次程序化同步必须写入审计事件，至少包含 timestamp、sourceEvent(dispatch / completion / watchdog)、taskId、sessionId、label、previousTasksState、nextTasksState、boardStatus 和 result(success / needs_review / failed)，便于追溯同步依据。
+
+##### FR-K31:Session Context Recovery Per-Turn Injection（每轮上下文恢复注入）
+
+OpenClaw（pm-01 子Agent）2026-06-06
+
+ACO 必须在 main agent 的飞书会话每轮消息进入主会话上下文前，prepend 一段“上下文恢复铁律”规则文本，提醒主会话在发现上文缺失、会话压缩或上下文断裂时，优先读取 session reset 归档文件恢复事实链路。该能力与现有 session reset 后一次性摘要注入共存：一次性摘要负责恢复最近会话事实，每轮规则文本负责让主会话持续记住恢复方法。
+
+为什么这样设计：会话压缩会丢失历史细节，单次摘要注入在长对话中仍可能被稀释。把恢复方法作为每轮 L2 引导注入，可以让主会话在每次行动前都看到“缺上下文先查归档”的操作规则，减少凭记忆下结论和误报。
+
+- AC1:当会话满足 `agentId=main` 且渠道为 `feishu` 时，系统必须在每轮用户消息进入主会话上下文前 prepend 上下文恢复规则文本；验收证据必须包含主会话 prompt 或注入日志中的规则文本。
+- AC2:当会话不属于飞书渠道，或目标 Agent 不是 main agent 时，系统不得注入该规则文本；验收证据必须包含非目标会话的 prompt 或注入日志，且其中不存在该规则文本。
+- AC3:每轮注入不得依赖去重状态、`globalThis` marker、上次注入时间或 `ageMs` 判断；连续两轮符合条件的 main + feishu 消息都必须看到该规则文本。
+- AC4:该能力必须与现有 session reset 后一次性摘要注入共存，二者的触发条件、注入文本和审计记录互不覆盖；同一轮同时命中时，prompt 中必须同时保留一次性摘要和每轮恢复规则。
+- AC5:每轮恢复规则注入 handler 的 priority 必须低于一次性摘要注入的 priority 990；当前实现 priority 为 900 时验收通过，后续调整仍需保持低于 990。
+
+##### FR-K32:自愈进化元规则（Self-Healing Governance Evolution）
+
+OpenClaw（pm-01 子Agent）2026-06-06
+
+当用户纠偏、追问 Why、追究 badcase 根因，或指出主会话重复违反同一类规则时，ACO 必须在每轮 L2 引导中提醒主会话主动评估：这个问题的长效解法是否应该创建、修改或强化 L2 插件注入规则、准入校验规则、SEVO 阶段 prompt 或产品 spec。若评估结果为需要固化，主会话必须当场派发对应的 spec 或插件改进任务，不能只写入 memory 或口头承诺下次改。
+
+为什么这样设计：没有这条元规则，系统只能靠用户反复纠偏才能收敛行为；有了它，每次 badcase 都会触发规则层自愈，把一次错误转化为下一轮更强的运行时引导，这是 Self-Evolving Harness 从被动修补走向主动进化的核心机制。
+
+- AC1:每轮 L2 引导文本必须包含自愈进化提醒，触发场景至少覆盖用户纠偏、追问 Why、追究 badcase 根因、重复违反同类规则四类；验收证据必须包含 prompt 注入文本或注入日志。
+- AC2:主会话在命中触发场景时，必须输出或记录一条自愈评估结论，字段至少包含 issueSummary、longTermLayer(L2 / SEVO prompt / spec / L0 / no-change)、decision、reason 和 nextAction；验收证据必须包含审计事件、任务上下文或主会话行动记录之一。
+- AC3:当 decision 为需要固化时，主会话必须在当前回合派发对应任务；规则缺少 spec 覆盖时先派 PM 修改 spec，已有 spec 覆盖时再派实现任务；验收证据必须包含任务看板中的任务记录、任务 prompt 或 SEVO 流水线记录之一。
+- AC4:当 decision 为 no-change 时，主会话必须写明原因，例如该问题属于一次性事实误读、用户临时偏好、已有 L2 规则已覆盖且只是执行失败；验收证据必须包含 reason 字段，禁止空泛写“无需处理”。
+- AC5:memory 只能记录历史事实，不能作为规则执行层；命中自愈场景后仅写 memory 而未评估或派发规则固化任务，审计必须判定为 fail。
+
+##### FR-K33:只读调研任务准入边界
+
+OpenClaw（pm-01 子Agent）2026-06-06
+
+ACO 的派发准入校验必须区分“项目产物变更”和“只读调研产出”。只读调研、审计、分析任务允许读取项目代码、配置、日志和文档，并把调研结果写入 workspace 级 `reports/` 目录；这类报告产出不是项目功能、配置或产品文档变更，不应触发研发流水线的 spec-first 准入要求。若任务会修改 `projects/<name>/src/`、`projects/<name>/docs/`、`extensions/`、配置文件、测试文件或发布产物，则仍按对应研发阶段进入流水线。
+
+为什么这样设计：调研报告是事实沉淀和决策输入，不是产品实现本身。把 `workspace/reports/` 写入误判为项目文件变更，会让纯调研任务被错误送入研发流水线，造成排查变慢、角色路由混乱和无意义的 spec 补写。
+
+- AC1:任务类型判定为 research、audit 或 analysis，且写入路径全部位于 `/root/.openclaw/workspace/reports/` 或工作区相对路径 `reports/` 时，准入校验必须将该写入视为只读调研产出，不触发 spec-first 流水线要求；验收证据必须包含任务 label、写入路径、判定结果和审计事件。
+- AC2:只读调研任务允许读取 `projects/`、`extensions/`、`docs/`、`logs/` 和配置文件，但不得修改这些路径下的项目源文件、产品文档、测试文件、发布脚本或运行配置；验收时如果 git diff 只包含 `reports/` 新增或修改，判定为只读调研产出。
+- AC3:同一任务只要同时修改 `reports/` 之外的项目文件，准入校验必须按实际修改类型重新分类；涉及代码、spec、架构、UX、测试、发布或配置变更时进入对应 SEVO 阶段。
+- AC4:审计事件必须记录 `researchOutputOnly=true/false`、`reportPaths[]`、`projectMutations[]` 和 finalDecision；当 `researchOutputOnly=true` 时 finalDecision 不得为 spec_missing_blocked。
+- AC5:验证用例必须覆盖三类输入：只写 `reports/foo.md` 的调研任务通过；读代码并写 `reports/foo.md` 的审计任务通过；同时写 `reports/foo.md` 和 `projects/aco/src/index.ts` 的任务按代码变更进入流水线。
+
+##### FR-K34:L2 注入 Why 质量门禁
+
+OpenClaw（cc ACP Agent）2026-06-06
+
+SEVO 审计阶段审查 ACO 及其他 L2 插件的注入文本时，必须逐条校验每条规则的 Why 质量，确保每条规则都说清了「用户当初为什么定这条规则」，而不是把技术后果翻译一遍当 Why。Why 缺失或质量不达标时审计判定为 FAIL，触发修复闭环，由开发 Agent 重写 Why 直到审计通过。
+
+为什么这样设计：系统已有「规则必须含 Why」的要求，但没有机制保证 Why 的质量。实践中补出来的 Why 常常是技术后果的直接翻译，比如「不这样做会导致 X 报错」，没有还原用户当初定这条规则时的真实意图。LLM 看不懂规则背后的意图，就只能机械匹配关键词，遇到边界 case 时仍会绕过或误判。把 Why 质量做成审计门禁，是逼迫每条规则把意图写清楚，让 LLM 能在新场景下按原意泛化，而不是靠碰壁后改口。
+
+- AC1:每条 L2 注入规则必须附带 Why 段落，缺失即判定为 FAIL；验收证据必须包含被审查的注入文本路径、规则定位和缺失判定的审计记录。
+- AC2:Why 必须用人话写清「用户当初为什么定这条规则」，回答规则背后的真实意图；只写技术后果描述（如「不这样做会报错」「会导致流程中断」）或用内部术语堆砌而读不懂的，判定为 FAIL；验收证据必须包含 Why 原文、判定结论和判定理由。
+- AC3:Why 质量判定必须用 LLM 语义理解，禁止通过关键词命中或正则匹配判定是否含 Why、Why 是否人话、Why 是否还原意图；验收证据必须包含判定调用的语义判断输出或审计事件中的 semantic 字段。
+- AC4:审计判定 FAIL 后必须触发 review-fix loop，由开发 Agent 重写对应规则的 Why，重写后重新进入审计，直到全部规则的 Why 通过；验收证据必须包含修复任务记录、重审记录和最终通过状态之一。
