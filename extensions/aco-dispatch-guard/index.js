@@ -144,16 +144,22 @@ function semanticYesFromRaw(rawResult = '' ) {
   return null;
 }
 
+// Advisory gate semantic checks (publish/readme/health-scan/bulk/exemption) run on
+// the dispatch path and must never stall spawning. They use a short timeout and
+// fail open (matched=false). The spec-first checks keep the longer default ceiling.
+const SEMANTIC_GATE_TIMEOUT_MS = 8000;
+
 /**
- * Reusable 5s yes/no semantic check. Failures return matched=false so callers can
- * safely fall back to the deterministic regex result.
+ * Reusable yes/no semantic check. Failures (config-missing / timeout / network /
+ * non-2xx / unparseable) return matched=false with a reason so callers can fail
+ * open. timeoutMs caps how long the call may block the caller.
  */
-async function askSemanticYesNo({ systemPrompt, text, maxChars = 2000 }) {
+async function askSemanticYesNo({ systemPrompt, text, maxChars = 2000, timeoutMs = 360000 }) {
   const llmCfg = resolveLlmConfig();
   if (!llmCfg) return { matched: false, reason: 'llm_config_unavailable' };
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 360000);
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
     const resp = await fetch(buildChatEndpoint(llmCfg.baseUrl), {
@@ -204,11 +210,29 @@ function isAlreadyInPipeline(label = '') {
   return normalized.startsWith('sevo:');
 }
 
-function hasUserExemption(text = '') {
-  // 用户授权豁免：task prompt 中包含【用户授权豁免】或明确的豁免声明时放行
-  // Why: 用户是最终决策者，当用户明确说"我授权豁免"时，guard 应该尊重用户意图而非机械拦截
+// 显式结构化豁免标记：用户在 prompt 中放入 [用户授权豁免] 标记是确定性结构信号，
+// 直接命中即放行，不需要 LLM。
+const USER_EXEMPTION_MARKER_RE = /【用户授权豁免】/;
+
+function hasUserExemptionMarker(text = '') {
+  return USER_EXEMPTION_MARKER_RE.test(String(text || ''));
+}
+
+// 自然语言豁免意图判定走 LLM 语义分类。判断"用户是否授权豁免某操作"属于语义理解，
+// 必须由 LLM 完成；用 /用户原话.*豁免/、/exempt.*user/ 之类正则会把任意提到"豁免"
+// 的文本误判为授权。失败时 fail-open=false（不豁免），让任务继续走正常准入校验。
+// Why: 用户是最终决策者，当用户明确授权豁免时 guard 应尊重；但"是否授权"是语义问题，
+// 关键词匹配既会漏判改写措辞，也会把讨论豁免的文本误当成授权，必须交给 LLM。
+async function hasUserExemption(text = '') {
   const s = String(text || '');
-  return /【用户授权豁免】/.test(s) || /用户原话[：:].*["「].*豁免.*["」]/.test(s) || /exempt.*user/i.test(s);
+  if (hasUserExemptionMarker(s)) return true;
+  const semantic = await askSemanticYesNo({
+    systemPrompt: '你是派发准入分类器。判断这段 task prompt 是否包含用户明确授权跳过/豁免本次派发准入校验的指令（例如用户原话明确表示“我授权豁免”“跳过校验直接派”）。只有用户主动授权豁免才回答 yes；仅仅提到、讨论或解释“豁免”这个概念回答 no。只回答 yes 或 no。',
+    text: s,
+    maxChars: 2000,
+    timeoutMs: SEMANTIC_GATE_TIMEOUT_MS,
+  });
+  return semantic.matched === true;
 }
 
 // FR-K33：只读调研产出准入边界。
@@ -360,8 +384,17 @@ function shouldInjectAuditGeneralizationCheck(label = '') {
   return normalizedLabel.includes('audit-');
 }
 
-function shouldInjectAcoPublishStrangerGate(prompt = '') {
-  return /publish|release/i.test(String(prompt || ''));
+// 「是否发布/release 任务」是语义判断，走 LLM。/publish|release/ 关键词会漏判
+// 「上线」「打包对外」等换词，也会误判只是提到这些词的非发布任务。
+// 失败 fail-open=false（不注入门禁），保持注入的保守性。
+async function shouldInjectAcoPublishStrangerGate(prompt = '') {
+  const semantic = await askSemanticYesNo({
+    systemPrompt: '你是任务分类器。判断这段任务是否要发布/对外 release 一个包或产物（例如 npm publish、打 release、对外分发安装包）。只有真正要执行发布动作回答 yes；只是开发、测试、写文档、内部构建回答 no。只回答 yes 或 no。',
+    text: String(prompt || ''),
+    maxChars: 2000,
+    timeoutMs: SEMANTIC_GATE_TIMEOUT_MS,
+  });
+  return semantic.matched === true;
 }
 
 function loadReadmeAutodispatchState() {
@@ -736,11 +769,19 @@ let _roleTaskMapCache = null;
 let _agentTierCache = null;
 
 const HEALTH_SCAN_T1_FALLBACK_AGENT_IDS = [...HEALTH_SCAN_T1_AGENT_IDS];
-const HEALTH_SCAN_TASK_RE = /健康扫描|health-scan|代码健康|code-health/i;
 const HEALTH_SCAN_T1_BLOCK_REASON = '健康扫描任务必须由 T1 编码 Agent（cc > codex > omp）执行';
 
-function isHealthScanTask(label = '', prompt = '') {
-  return HEALTH_SCAN_TASK_RE.test(`${String(label || '')}\n${String(prompt || '')}`);
+// 「是否健康扫描任务」是语义判断，不能用 /健康扫描|health-scan/ 关键词匹配
+// （会漏判换措辞的扫描请求，也会误判只是提到这些词的审计/文档任务）。走 LLM 语义分类。
+// 失败时 fail-open=false（不强制 T1），避免分类器抖动把普通任务误路由。
+async function isHealthScanTask(label = '', prompt = '') {
+  const semantic = await askSemanticYesNo({
+    systemPrompt: '你是任务分类器。判断这段任务是否是“代码健康扫描/健康度巡检”类任务——即对一个代码库或模块做系统性的健康度、质量、风险全面扫描排查。只有系统性健康扫描回答 yes；普通的单点 bug 修复、功能开发、写文档、写需求、单文件审查回答 no。只回答 yes 或 no。',
+    text: `label: ${String(label || '(none)')}\nprompt: ${String(prompt || '(none)')}`,
+    maxChars: 2000,
+    timeoutMs: SEMANTIC_GATE_TIMEOUT_MS,
+  });
+  return semantic.matched === true;
 }
 
 function shouldEnforceHealthScanT1(classification) {
@@ -1904,7 +1945,7 @@ const agentDispatchGuardPlugin = {
             // Only enforce after a positive coding/development classification. If the classifier
             // fell back (LLM timeout/error/unavailable), prefer allowing the task rather than
             // falsely blocking audit/spec/doc work that merely mentions health scans.
-            if (!roleOverride && isHealthScanTask(taskLabel, taskPrompt) && shouldEnforceHealthScanT1(classification)) {
+            if (!roleOverride && shouldEnforceHealthScanT1(classification) && await isHealthScanTask(taskLabel, taskPrompt)) {
               const healthScanT1AgentIds = getHealthScanT1AgentIds();
               if (!healthScanT1AgentIds.includes(agentId)) {
                 appendAuditEvent({
@@ -1928,7 +1969,7 @@ const agentDispatchGuardPlugin = {
             // 并明确要求子 Agent 先读该文档。不再用 FR/AC 编号或关键词正则替代 spec 文档路径。
             const promptForSpecCheck = (nextParams || args).prompt || taskPrompt;
             const pipelineDelegated = isAlreadyInPipeline(taskLabel);
-            const hasExemption = hasUserExemption(promptForSpecCheck);
+            const hasExemption = await hasUserExemption(promptForSpecCheck);
             const semanticTaskType = detectedType;
             const classifierProvider = classification.source || 'unknown';
             const semanticReason = classification.classifierFailed
@@ -2172,12 +2213,20 @@ const agentDispatchGuardPlugin = {
                   }
                 }
 
-                // Check bulk keywords (no numeric LIMIT constraint)
+                // No explicit numeric count: judge bulk intent semantically (LLM),
+                // not by /全部条目|全量|批量/ keyword matching. Only runs for data-ops
+                // tasks lacking a numeric count, so the call surface is narrow.
+                // Fail-open=false (no warning) on classifier failure.
                 if (!estimatedCount) {
-                  const bulkKeywords = /全部条目|所有条目|all entries|全量|批量/;
-                  if (bulkKeywords.test(bulkCheckPrompt)) {
+                  const bulkIntent = await askSemanticYesNo({
+                    systemPrompt: '你是数据运维任务分类器。判断这段任务是否要求对全量或大批量数据条目做处理/更新/迁移/清理（即一次性覆盖“全部/所有/全量”条目，而不是少量几条）。是大批量全量操作回答 yes；只处理少量、单条或明确小范围回答 no。只回答 yes 或 no。',
+                    text: String(bulkCheckPrompt || ''),
+                    maxChars: 2000,
+                    timeoutMs: SEMANTIC_GATE_TIMEOUT_MS,
+                  });
+                  if (bulkIntent.matched === true) {
                     estimatedCount = 1000; // default estimate when no number available
-                    triggerReason = 'bulk keyword detected';
+                    triggerReason = 'bulk intent (LLM)';
                   }
                 }
 
@@ -2265,7 +2314,7 @@ const agentDispatchGuardPlugin = {
             }
 
             const currentPromptBeforeAcoPublishGate = (nextParams || args).prompt || taskPrompt;
-            if (shouldInjectAcoPublishStrangerGate(currentPromptBeforeAcoPublishGate)
+            if (await shouldInjectAcoPublishStrangerGate(currentPromptBeforeAcoPublishGate)
               && !currentPromptBeforeAcoPublishGate.includes(ACO_PUBLISH_STRANGER_GATE_APPENDIX.trim())) {
               appendAuditEvent({
                 decision: 'rewrite',
@@ -2283,12 +2332,21 @@ const agentDispatchGuardPlugin = {
               };
             }
 
-            // README quality rules injection: when task prompt mentions README
-            if (/readme/i.test(taskPrompt)) {
+            // README quality rules injection: when the task is about writing/updating
+            // user-facing README docs. 「是否在写 README」是语义判断，走 LLM；
+            // /readme/i 会把只是顺带提到 readme 的任务误判，也漏判换措辞的文档任务。
+            // 失败 fail-open=false（不注入规则），保持注入保守。
+            const readmeIntent = await askSemanticYesNo({
+              systemPrompt: '你是任务分类器。判断这段任务的主要目标是否是撰写或更新面向用户的 README / 项目说明文档。只有任务目标确实是写/改 README 时回答 yes；只是顺带提到 readme、或任务目标是写代码/测试/需求/其他文档回答 no。只回答 yes 或 no。',
+              text: String(taskPrompt || ''),
+              maxChars: 2000,
+              timeoutMs: SEMANTIC_GATE_TIMEOUT_MS,
+            });
+            if (readmeIntent.matched === true) {
               appendAuditEvent({
                 decision: 'rewrite',
                 ruleId: 'dispatch.sessions_spawn.readme_quality_rules_injected',
-                reason: 'task prompt contains README keyword, injecting quality rules',
+                reason: 'LLM classified the task as README authoring; injecting quality rules',
                 toolName,
                 agentId,
                 sessionKey: typeof hookCtx?.sessionKey === 'string' ? hookCtx.sessionKey : null,
