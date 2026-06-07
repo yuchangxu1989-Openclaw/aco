@@ -62,12 +62,12 @@ export const ROLE_TAG_ALIASES: Readonly<Record<string, BuiltInRoleTag>> = Object
 } satisfies Record<string, BuiltInRoleTag>);
 
 export const ROLE_AGENT_FALLBACK: RoleMap = Object.freeze({
-  pm: Object.freeze(['pm-01', 'pm-02']),
-  research: Object.freeze(['feynman', 're', 'codex', 'sa-01', 'sa-02', 'pm-01', 'pm-02', 'ux-01']),
-  architecture: Object.freeze(['sa-01', 'sa-02']),
-  coding: Object.freeze(['cc', 'codex', 'omp', 'hermes', 'free-code', 'opencode', 'dev-01', 'dev-02']),
-  review: Object.freeze(['audit-01', 'audit-02', 'sa-01', 'sa-02', 'pm-01', 'pm-02', 'ux-01']),
-  ux: Object.freeze(['ux-01']),
+  pm: Object.freeze([]),
+  research: Object.freeze([]),
+  architecture: Object.freeze([]),
+  coding: Object.freeze([]),
+  review: Object.freeze([]),
+  ux: Object.freeze([]),
 });
 
 export const ROLE_TASK_TYPES: RoleMap = Object.freeze({
@@ -111,36 +111,9 @@ export const TASK_TYPE_EXPECTED_ROLE = Object.freeze({
   readme: 'pm',
 } satisfies Record<string, RoleName>);
 
-export const CODING_TIER_BY_AGENT_ID: Readonly<Record<string, CodingTier>> = Object.freeze({
-  cc: 'T1',
-  codex: 'T1',
-  omp: 'T1',
-  hermes: 'T2',
-  'free-code': 'T2',
-  opencode: 'T2',
-  'dev-01': 'T3',
-  'dev-02': 'T3',
-} satisfies Record<string, CodingTier>);
+export const CODING_TIER_BY_AGENT_ID: Readonly<Record<string, CodingTier>> = Object.freeze({});
 
-export const DEFAULT_AGENT_TIER_FALLBACK: readonly AgentTierFallbackEntry[] = Object.freeze([
-  Object.freeze({ id: 'cc', runtime: 'acp', role: 'coding', tier: 'T1' }),
-  Object.freeze({ id: 'codex', runtime: 'acp', role: 'coding', tier: 'T1' }),
-  Object.freeze({ id: 'omp', runtime: 'acp', role: 'coding', tier: 'T1' }),
-  Object.freeze({ id: 'hermes', runtime: 'acp', role: 'coding', tier: 'T2' }),
-  Object.freeze({ id: 'free-code', runtime: 'acp', role: 'coding', tier: 'T2' }),
-  Object.freeze({ id: 'opencode', runtime: 'acp', role: 'coding', tier: 'T2' }),
-  Object.freeze({ id: 'dev-01', runtime: 'subagent', role: 'coding', tier: 'T3' }),
-  Object.freeze({ id: 'dev-02', runtime: 'subagent', role: 'coding', tier: 'T3' }),
-  Object.freeze({ id: 'feynman', runtime: 'acp', role: 'research', tier: 'research' }),
-  Object.freeze({ id: 're', runtime: 'acp', role: 'research', tier: 'research' }),
-  Object.freeze({ id: 'sa-01', runtime: 'subagent', role: 'architecture', tier: 'arch' }),
-  Object.freeze({ id: 'sa-02', runtime: 'subagent', role: 'architecture', tier: 'arch' }),
-  Object.freeze({ id: 'pm-01', runtime: 'subagent', role: 'pm', tier: 'pm' }),
-  Object.freeze({ id: 'pm-02', runtime: 'subagent', role: 'pm', tier: 'pm' }),
-  Object.freeze({ id: 'audit-01', runtime: 'subagent', role: 'review', tier: 'audit' }),
-  Object.freeze({ id: 'audit-02', runtime: 'subagent', role: 'review', tier: 'audit' }),
-  Object.freeze({ id: 'ux-01', runtime: 'subagent', role: 'ux', tier: 'ux' }),
-]);
+export const DEFAULT_AGENT_TIER_FALLBACK: readonly AgentTierFallbackEntry[] = Object.freeze([]);
 
 export const HEALTH_SCAN_T1_AGENT_IDS = Object.freeze(
   Object.entries(CODING_TIER_BY_AGENT_ID)
@@ -175,20 +148,12 @@ export function normalizeRoleTag(role: unknown): string {
   return ROLE_TAG_ALIASES[value] ?? value;
 }
 
-export function inferRoleByAgentId(agentId: unknown): RoleName | null {
-  const id = String(agentId || '').trim().toLowerCase();
-  if (!id || id === 'main') return null;
-  if (CODING_TIER_BY_AGENT_ID[id]) return 'coding';
-  if (id === 'feynman' || id === 're') return 'research';
-  if (id.startsWith('sa-')) return 'architecture';
-  if (id.startsWith('pm-')) return 'pm';
-  if (id.startsWith('audit-')) return 'review';
-  if (id.startsWith('ux-')) return 'ux';
+export function inferRoleByAgentId(_agentId: unknown): RoleName | null {
   return null;
 }
 
-export function inferTierByAgentId(agentId: unknown): CodingTier | null {
-  return CODING_TIER_BY_AGENT_ID[String(agentId || '').trim()] ?? null;
+export function inferTierByAgentId(_agentId: unknown): CodingTier | null {
+  return null;
 }
 
 export function buildRoleTaskMapFromRoleAgents(

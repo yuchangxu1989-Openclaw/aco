@@ -9,7 +9,7 @@ import type { Task, AgentSlot } from '../types/index.js';
 import type { DevAuditSeparationConfig, DevAuditResult } from './types.js';
 
 const DEFAULT_CONFIG: DevAuditSeparationConfig = {
-  auditPool: ['audit-01', 'audit-02'],
+  auditPool: [],
   devRoles: ['coder', 'architect'],
   auditRoles: ['auditor'],
   enabled: true,
@@ -123,8 +123,8 @@ function isAuditTask(task: Task): boolean {
 }
 
 /**
- * 从审计池中选择可用的审计 Agent，排除任务执行者。
- * AC2: 优先选择具有 auditor 角色的 agent。
+ * 从可用 Agent 中选择审计 Agent，排除任务执行者。
+ * AC2: 优先选择具有 auditor 角色的 agent；无状态信息时只使用显式配置的 auditPool。
  */
 function selectAuditor(
   executorAgentId: string,
@@ -143,7 +143,7 @@ function selectAuditor(
       return auditorRoleCandidates[0].agentId;
     }
 
-    // Fallback: 从配置的 auditPool 中选择
+    // Fallback: 从显式配置的 auditPool 中选择
     const poolCandidates = availableAgents
       .filter(a => config.auditPool.includes(a.agentId))
       .filter(a => a.agentId !== executorAgentId)
@@ -155,7 +155,7 @@ function selectAuditor(
     }
   }
 
-  // 无状态信息时，从审计池中选择第一个非执行者
+  // 无状态信息时，从显式配置的审计池中选择第一个非执行者
   const fallback = config.auditPool.find((id: string) => id !== executorAgentId);
   return fallback;
 }

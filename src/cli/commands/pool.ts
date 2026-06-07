@@ -44,7 +44,7 @@ Options:
 Examples:
   aco pool status
   aco pool status --tier T2
-  aco pool add dev-01 --tier T2 --role coder --runtime subagent
+  aco pool add my-agent --tier T2 --role coder --runtime subagent
   aco pool sync
 `.trim();
 
@@ -135,7 +135,7 @@ async function poolAdd(args: string[]): Promise<number> {
   const agentId = args.find(a => !a.startsWith('--'));
   if (!agentId) {
     console.error('Error [POOL_MISSING_ID]: Please specify an agent ID.');
-    console.error('Suggestion: aco pool add dev-01 --tier T2 --role coder');
+    console.error('Suggestion: aco pool add my-agent --tier T2 --role coder');
     return 1;
   }
 

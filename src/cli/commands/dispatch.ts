@@ -27,9 +27,9 @@ Options:
   --json                  JSON 格式输出
 
 Examples:
-  aco dispatch hermes -m "实现用户登录功能"
+  aco dispatch my-agent -m "实现用户登录功能"
   aco dispatch -m "修复 bug #123" --label "bugfix-123" --timeout 1200
-  aco dispatch cc -m "代码审查" --tier T1
+  aco dispatch review-agent -m "代码审查" --tier T1
 `.trim();
 
 interface AdapterFileConfig {
@@ -92,7 +92,7 @@ export async function dispatchCommand(args: string[]): Promise<number> {
   if (!message) {
     console.error('Error [DISPATCH_NO_MESSAGE]: Message is required.');
     console.error('Suggestion: Use -m or --message to specify the task prompt.');
-    console.error('Example: aco dispatch hermes -m "实现用户登录功能"');
+    console.error('Example: aco dispatch my-agent -m "实现用户登录功能"');
     return 1;
   }
 

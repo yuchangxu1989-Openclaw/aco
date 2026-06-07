@@ -8,7 +8,7 @@ import type { AgentSlot, Task, Tier, RoleTag } from '../types/index.js';
 // --- FR-C01: 开发审计分离 ---
 
 export interface DevAuditSeparationConfig {
-  /** 审计 Agent 池（默认 ['audit-01', 'audit-02']） */
+  /** 显式配置的审计 Agent 池；默认空，优先使用运行时 roles 中的 auditor */
   auditPool: string[];
   /** 开发角色标签（这些角色的 agent 禁止自审） */
   devRoles: RoleTag[];
