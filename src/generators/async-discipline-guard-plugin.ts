@@ -2,25 +2,25 @@
  * Async Discipline Guard Plugin Generator — FR-K01/K02/K03
  *
  * Generates a Gateway-loadable ESM plugin file that blocks main-session
- * process(poll/wait/log/list) calls with long timeouts. FR-K02 uses LLM
- * semantic intent judgement for one-call exemptions. FR-K03 uses degradedAt
+ * process(poll/wait/log/list) calls with long timeouts. FR-K02 uses Ark
+ * embedding cosine similarity for one-call exemptions. FR-K03 uses degradedAt
  * timestamp recovery.
  */
 
 import { writeFile, mkdir, access, readFile } from 'node:fs/promises';
-import { join, dirname } from 'node:path';
+import { readFileSync } from 'node:fs';
+import { join, dirname, resolve } from 'node:path';
 import type { Generator, GeneratorEnv } from './index.js';
 import type { AcoFileConfig } from '../config/config-schema.js';
-import { DEFAULT_ASYNC_DISCIPLINE_CONFIG, LLM_INTENT_JUDGEMENT_PROMPT_V1 } from '../control/async-discipline-guard.js';
+import { DEFAULT_ASYNC_DISCIPLINE_CONFIG } from '../control/async-discipline-guard.js';
+import { SEMANTIC_VECTOR_DB_PATH, SEMANTIC_VECTOR_MODEL } from '../shared/semantic-vector-classifier.js';
 
 export interface AsyncDisciplineGuardPluginOptions {
   enabled?: boolean;
   maxBlockingTimeoutMs?: number;
   blockingActions?: string[];
-  llmJudgement?: {
+  vectorJudgement?: {
     enabled?: boolean;
-    provider?: string;
-    model?: string;
     timeoutMs?: number;
   };
   degradedRecoveryWindowMs?: number;
@@ -33,7 +33,7 @@ const DEFAULT_OPTIONS: Required<AsyncDisciplineGuardPluginOptions> = {
   enabled: DEFAULT_ASYNC_DISCIPLINE_CONFIG.enabled,
   maxBlockingTimeoutMs: DEFAULT_ASYNC_DISCIPLINE_CONFIG.maxBlockingTimeoutMs,
   blockingActions: DEFAULT_ASYNC_DISCIPLINE_CONFIG.blockingActions,
-  llmJudgement: DEFAULT_ASYNC_DISCIPLINE_CONFIG.llmJudgement,
+  vectorJudgement: DEFAULT_ASYNC_DISCIPLINE_CONFIG.vectorJudgement,
   degradedRecoveryWindowMs: DEFAULT_ASYNC_DISCIPLINE_CONFIG.degradedRecoveryWindowMs,
   auditLogPath: '',
   pluginName: 'aco-async-discipline-guard',
@@ -41,16 +41,14 @@ const DEFAULT_OPTIONS: Required<AsyncDisciplineGuardPluginOptions> = {
 };
 
 function mergeOptions(options?: AsyncDisciplineGuardPluginOptions): Required<AsyncDisciplineGuardPluginOptions> {
-  const rawLlm = options?.llmJudgement ?? {};
+  const rawVector = options?.vectorJudgement ?? {};
   return {
     enabled: options?.enabled ?? DEFAULT_OPTIONS.enabled,
     maxBlockingTimeoutMs: options?.maxBlockingTimeoutMs ?? DEFAULT_OPTIONS.maxBlockingTimeoutMs,
     blockingActions: options?.blockingActions ?? DEFAULT_OPTIONS.blockingActions,
-    llmJudgement: {
-      enabled: rawLlm.enabled ?? DEFAULT_OPTIONS.llmJudgement.enabled,
-      provider: rawLlm.provider ?? DEFAULT_OPTIONS.llmJudgement.provider,
-      model: rawLlm.model ?? DEFAULT_OPTIONS.llmJudgement.model,
-      timeoutMs: rawLlm.timeoutMs ?? DEFAULT_OPTIONS.llmJudgement.timeoutMs,
+    vectorJudgement: {
+      enabled: rawVector.enabled ?? DEFAULT_OPTIONS.vectorJudgement.enabled,
+      timeoutMs: rawVector.timeoutMs ?? DEFAULT_OPTIONS.vectorJudgement.timeoutMs,
     },
     degradedRecoveryWindowMs: options?.degradedRecoveryWindowMs ?? DEFAULT_OPTIONS.degradedRecoveryWindowMs,
     auditLogPath: options?.auditLogPath ?? DEFAULT_OPTIONS.auditLogPath,
@@ -59,11 +57,16 @@ function mergeOptions(options?: AsyncDisciplineGuardPluginOptions): Required<Asy
   };
 }
 
+function loadEmbeddedVectorDb(): unknown {
+  return JSON.parse(readFileSync(SEMANTIC_VECTOR_DB_PATH, 'utf-8'));
+}
+
 export function generateAsyncDisciplineGuardPlugin(options?: AsyncDisciplineGuardPluginOptions): string {
   const opts = mergeOptions(options);
   const auditLogLine = opts.auditLogPath
     ? `const AUDIT_LOG_PATH = ${JSON.stringify(opts.auditLogPath)};`
     : `const AUDIT_LOG_PATH = path.join(process.env.HOME || os.homedir(), '.openclaw', 'workspace', 'logs', 'dispatch-guard-events.jsonl');`;
+  const embeddedVectorDb = loadEmbeddedVectorDb();
 
   return `/**
  * ACO Async Discipline Guard Plugin — Gateway-loadable ESM module
@@ -80,14 +83,15 @@ import crypto from 'node:crypto';
 
 ${auditLogLine}
 
-const LLM_INTENT_JUDGEMENT_PROMPT_VERSION = 'v1';
-const LLM_INTENT_JUDGEMENT_PROMPT_V1 = ${JSON.stringify(LLM_INTENT_JUDGEMENT_PROMPT_V1)};
+const VECTOR_INTENT_DOMAIN = 'async-exemption-intent';
+const VECTOR_MODEL = ${JSON.stringify(SEMANTIC_VECTOR_MODEL)};
+const VECTOR_DB = ${JSON.stringify(embeddedVectorDb)};
 
 export const DEFAULT_CONFIG = ${JSON.stringify({
   enabled: opts.enabled,
   maxBlockingTimeoutMs: opts.maxBlockingTimeoutMs,
   blockingActions: opts.blockingActions,
-  llmJudgement: opts.llmJudgement,
+  vectorJudgement: opts.vectorJudgement,
   degradedRecoveryWindowMs: opts.degradedRecoveryWindowMs,
 }, null, 2)};
 
@@ -97,6 +101,7 @@ export default {
 
   register(api) {
     const recentUserMessageCache = new Map();
+    const embeddingCache = new Map();
     let degradedAt = null;
 
     function getPluginConfig() {
@@ -106,10 +111,11 @@ export default {
       const raw = pluginConfig.asyncDisciplineGuard || pluginConfig;
       const legacyField = ['user', 'Exempt', 'Keywords'].join('');
       if (Object.prototype.hasOwnProperty.call(raw, legacyField)) {
-        api.logger?.warn?.('[${opts.pluginName}] FR-K02: legacy keyword exemption config is deprecated and ignored; exemption now uses LLM semantic intent judgement.');
+        api.logger?.warn?.('[${opts.pluginName}] FR-K02: legacy keyword exemption config is deprecated and ignored; exemption now uses embedding cosine similarity.');
       }
-      const cfg = { ...DEFAULT_CONFIG, ...raw, llmJudgement: { ...DEFAULT_CONFIG.llmJudgement, ...(raw.llmJudgement || {}) } };
+      const cfg = { ...DEFAULT_CONFIG, ...raw, vectorJudgement: { ...DEFAULT_CONFIG.vectorJudgement, ...(raw.vectorJudgement || {}) } };
       delete cfg[legacyField];
+      delete cfg[['llm', 'Judgement'].join('')];
       if (!Number.isFinite(Number(cfg.maxBlockingTimeoutMs)) || Number(cfg.maxBlockingTimeoutMs) <= 0) {
         api.logger?.warn?.('[${opts.pluginName}] invalid maxBlockingTimeoutMs, fallback to 5000');
         cfg.maxBlockingTimeoutMs = 5000;
@@ -122,17 +128,8 @@ export default {
       } else {
         cfg.degradedRecoveryWindowMs = recovery;
       }
-      if (!Number.isFinite(Number(cfg.llmJudgement.timeoutMs)) || Number(cfg.llmJudgement.timeoutMs) <= 0) cfg.llmJudgement.timeoutMs = 5000;
-      if (!isConfiguredModel(api.config, cfg.llmJudgement.provider, cfg.llmJudgement.model)) {
-        api.logger?.error?.('[${opts.pluginName}] asyncDisciplineGuard.llmJudgement provider/model is not configured in models.providers; judgement will block exemptions.');
-      }
+      if (!Number.isFinite(Number(cfg.vectorJudgement.timeoutMs)) || Number(cfg.vectorJudgement.timeoutMs) <= 0) cfg.vectorJudgement.timeoutMs = 8000;
       return cfg;
-    }
-
-    function isConfiguredModel(config, provider, model) {
-      const models = config?.models?.providers?.[provider]?.models;
-      if (Array.isArray(models)) return models.some(m => (typeof m === 'string' ? m : m?.id) === model);
-      return Boolean(models && typeof models === 'object' && Object.prototype.hasOwnProperty.call(models, model));
     }
 
     function extractSessionKey(event, context) {
@@ -218,14 +215,14 @@ export default {
         '  1. 信任 push-based completion event。spawn 后直接结束当前回合，子 Agent 完成时会自动触发新回合，无需主动 poll。',
         '  2. 确实需要观察某个进程状态，改派一个短任务子 Agent 异步执行 poll，完成后通过 completion event 回报结果。',
         '',
-        '豁免方式: 用户在最近一条 IM 消息中明确表达让主会话本回合亲自执行这件事的意图，由 LLM 语义判定。',
+        '豁免方式: 用户在最近一条 IM 消息中明确表达让主会话本回合亲自执行这件事的意图，由向量匹配判定。',
         '豁免仅本次有效，下次调用重新走完整守卫。',
         '',
         '命中规则: dispatch.process.async_discipline_blocked',
       ].join('\\n');
     }
 
-    function audit({ decision, ruleId, reason, event, context, llmVerdict = 'not_applicable', llmLatencyMs = 0, llmError = null, llmPromptVersion = null, details = {} }) {
+    function audit({ decision, ruleId, reason, event, context, vectorVerdict = 'not_applicable', vectorLatencyMs = 0, vectorError = null, vectorModel = null, vectorScore = null, vectorConfidenceBand = null, matchedSampleId = null, details = {} }) {
       const sessionKey = extractSessionKey(event, context);
       const agentId = extractAgentId(event, context, sessionKey);
       const params = event?.params || event?.args || context?.params || {};
@@ -249,63 +246,92 @@ export default {
         exemptKeyword: null,
         triggerKeyword: null,
         recentUserMessageHash: hashMessage(recent),
-        llmVerdict,
-        llmLatencyMs,
-        llmError,
-        llmPromptVersion,
+        vectorVerdict,
+        vectorLatencyMs,
+        vectorError,
+        vectorModel,
+        vectorScore,
+        vectorConfidenceBand,
         reason,
-        details: { rule: 'async-discipline', ruleId, decision, action, timeoutMs, exemptKeyword: null, triggerKeyword: null, recentUserMessageHash: hashMessage(recent), llmVerdict, llmLatencyMs, llmError, llmPromptVersion, reason, ...details },
+        details: { rule: 'async-discipline', ruleId, decision, action, timeoutMs, exemptKeyword: null, triggerKeyword: null, recentUserMessageHash: hashMessage(recent), vectorVerdict, vectorLatencyMs, vectorError, vectorModel, vectorScore, vectorConfidenceBand, matchedSampleId, reason, ...details },
       });
     }
 
-    function normalizeLlmIntentRaw(raw) {
-      return String(raw ?? '').trim().toUpperCase().replace(/[\\p{P}\\p{S}]/gu, '');
+    function readEmbeddingConfig() {
+      const provider = api.config?.models?.providers?.['volcengine-ark'] || {};
+      const apiKey = process.env.ARK_API_KEY || provider.apiKey;
+      const baseUrl = String(provider.baseUrl || provider.baseURL || 'https://ark.cn-beijing.volces.com/api/v3').replace(/\\/+$/, '');
+      if (!apiKey) return null;
+      return { baseUrl, apiKey, model: VECTOR_MODEL, providerId: 'volcengine-ark' };
     }
 
-    function buildIntentMessages(recent) {
-      return {
-        system: LLM_INTENT_JUDGEMENT_PROMPT_V1,
-        user: '请判断下面这条用户当前消息是否表达授权主会话本回合亲自执行长任务。\\n\\n\\x60\\x60\\x60\\n' + String(recent ?? '') + '\\n\\x60\\x60\\x60',
-      };
-    }
-
-    async function callConfiguredChatProvider(cfg, messages, signal) {
-      if (api.openclaw?.chat?.complete) {
-        const res = await api.openclaw.chat.complete({ provider: cfg.llmJudgement.provider, model: cfg.llmJudgement.model, messages, signal });
-        return res?.text ?? res?.content ?? res?.message?.content ?? '';
-      }
-      const providerCfg = api.config?.models?.providers?.[cfg.llmJudgement.provider];
-      if (!providerCfg) throw new Error('provider not configured');
-      const baseUrl = String(providerCfg.baseUrl || providerCfg.baseURL || '').replace(/\\/$/, '');
-      const apiKey = providerCfg.apiKey || providerCfg.auth?.apiKey || providerCfg.request?.auth?.token;
-      if (!baseUrl || !apiKey) throw new Error('provider baseUrl/apiKey unavailable');
-      const response = await fetch(baseUrl + '/chat/completions', {
-        method: 'POST',
-        signal,
-        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + apiKey, ...(providerCfg.headers || {}) },
-        body: JSON.stringify({ model: cfg.llmJudgement.model, messages, temperature: 0, max_tokens: 4 }),
-      });
-      if (!response.ok) throw new Error('provider HTTP ' + response.status);
-      const data = await response.json();
-      return data?.choices?.[0]?.message?.content ?? data?.choices?.[0]?.text ?? '';
-    }
-
-    async function llmIntentJudgement(cfg, recent, action, timeoutMs) {
-      if (cfg.llmJudgement?.enabled === false) return { llmVerdict: 'disabled', llmLatencyMs: 0, llmError: null, llmPromptVersion: null };
-      const started = Date.now();
+    async function embedText(text, timeoutMs) {
+      const normalized = String(text || '').replace(/\\s+/g, ' ').trim();
+      if (!normalized) return null;
+      const cfg = readEmbeddingConfig();
+      if (!cfg) return null;
+      const cacheKey = cfg.model + ':' + normalized;
+      if (embeddingCache.has(cacheKey)) return embeddingCache.get(cacheKey);
       const controller = new AbortController();
-      const timeoutLimit = Number(cfg.llmJudgement.timeoutMs || 5000);
-      const timer = setTimeout(() => controller.abort(), timeoutLimit);
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
       try {
-        const prompt = buildIntentMessages(recent);
-        const raw = await callConfiguredChatProvider(cfg, [{ role: 'system', content: prompt.system }, { role: 'user', content: prompt.user }], controller.signal);
-        const normalized = normalizeLlmIntentRaw(raw);
-        return { llmVerdict: normalized === 'YES' ? 'allow' : 'deny', llmLatencyMs: Math.max(0, Date.now() - started), llmError: null, llmPromptVersion: LLM_INTENT_JUDGEMENT_PROMPT_VERSION };
-      } catch (e) {
-        const timeout = e?.name === 'AbortError';
-        return { llmVerdict: timeout ? 'timeout' : 'error', llmLatencyMs: timeout ? timeoutLimit : Math.max(0, Date.now() - started), llmError: (timeout ? 'timeout' : String(e?.message || e)).slice(0, 256), llmPromptVersion: LLM_INTENT_JUDGEMENT_PROMPT_VERSION };
+        const response = await fetch(cfg.baseUrl + '/embeddings/multimodal', {
+          method: 'POST',
+          signal: controller.signal,
+          headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + cfg.apiKey },
+          body: JSON.stringify({ model: cfg.model, input: [{ type: 'text', text: normalized.slice(0, 4000) }], encoding_format: 'float' }),
+        });
+        if (!response.ok) return null;
+        const payload = await response.json();
+        const vector = Array.isArray(payload?.data) ? payload.data[0]?.embedding : payload?.data?.embedding;
+        if (!Array.isArray(vector) || vector.length !== VECTOR_DB.dimensions) return null;
+        const numeric = vector.map(Number);
+        if (numeric.some(v => !Number.isFinite(v))) return null;
+        embeddingCache.set(cacheKey, numeric);
+        return numeric;
+      } catch {
+        return null;
       } finally {
         clearTimeout(timer);
+      }
+    }
+
+    function cosineSimilarity(a, b) {
+      if (!Array.isArray(a) || !Array.isArray(b) || a.length === 0 || a.length !== b.length) return -1;
+      let dot = 0;
+      let normA = 0;
+      let normB = 0;
+      for (let i = 0; i < a.length; i += 1) {
+        const av = Number(a[i]);
+        const bv = Number(b[i]);
+        if (!Number.isFinite(av) || !Number.isFinite(bv)) return -1;
+        dot += av * bv;
+        normA += av * av;
+        normB += bv * bv;
+      }
+      if (normA === 0 || normB === 0) return -1;
+      return dot / (Math.sqrt(normA) * Math.sqrt(normB));
+    }
+
+    async function vectorIntentJudgement(cfg, recent) {
+      if (cfg.vectorJudgement?.enabled === false) return { vectorVerdict: 'disabled', vectorLatencyMs: 0, vectorError: null, vectorModel: null, vectorScore: null, vectorConfidenceBand: null };
+      const started = Date.now();
+      const timeoutLimit = Number(cfg.vectorJudgement.timeoutMs || 8000);
+      try {
+        const query = await embedText(recent || '', timeoutLimit);
+        if (!query) return { vectorVerdict: 'unavailable', vectorLatencyMs: Math.max(0, Date.now() - started), vectorError: 'query embedding unavailable', vectorModel: VECTOR_MODEL, vectorScore: null, vectorConfidenceBand: null };
+        const samples = VECTOR_DB.samples.filter(sample => sample.domain === VECTOR_INTENT_DOMAIN);
+        let best = null;
+        for (const sample of samples) {
+          const score = cosineSimilarity(query, sample.vector);
+          if (!best || score > best.score) best = { sample, score };
+        }
+        if (!best) return { vectorVerdict: 'unavailable', vectorLatencyMs: Math.max(0, Date.now() - started), vectorError: 'no comparable vectors', vectorModel: VECTOR_MODEL, vectorScore: null, vectorConfidenceBand: null };
+        const band = best.score >= VECTOR_DB.thresholds.direct ? 'direct' : best.score >= VECTOR_DB.thresholds.fallback ? 'fallback' : 'none';
+        if (band === 'none') return { vectorVerdict: 'unavailable', vectorLatencyMs: Math.max(0, Date.now() - started), vectorError: 'below vector threshold', vectorModel: VECTOR_MODEL, vectorScore: best.score, vectorConfidenceBand: band, matchedSampleId: best.sample.id };
+        return { vectorVerdict: best.sample.label === 'deny' ? 'deny' : 'allow', vectorLatencyMs: Math.max(0, Date.now() - started), vectorError: null, vectorModel: VECTOR_MODEL, vectorScore: best.score, vectorConfidenceBand: band, matchedSampleId: best.sample.id };
+      } catch (e) {
+        return { vectorVerdict: 'unavailable', vectorLatencyMs: Math.max(0, Date.now() - started), vectorError: String(e?.message || e).slice(0, 256), vectorModel: VECTOR_MODEL, vectorScore: null, vectorConfidenceBand: null };
       }
     }
 
@@ -340,14 +366,14 @@ export default {
       if (timeoutMs < cfg.maxBlockingTimeoutMs) return null;
 
       const recent = recentUserMessageCache.get(sessionKey)?.text ?? null;
-      const llm = await llmIntentJudgement(cfg, recent, action, timeoutMs);
-      if (llm.llmVerdict === 'allow') {
-        audit({ decision: 'exempt', ruleId: 'dispatch.process.async_discipline_exempted', reason: 'User exemption intent judged by LLM.', event, context, ...llm });
+      const vector = await vectorIntentJudgement(cfg, recent);
+      if (vector.vectorVerdict !== 'deny') {
+        audit({ decision: 'exempt', ruleId: 'dispatch.process.async_discipline_exempted', reason: vector.vectorVerdict === 'allow' ? 'User exemption intent matched by embedding cosine similarity.' : 'Embedding classifier unavailable; allowing tool call without LLM fallback.', event, context, ...vector });
         return null;
       }
 
       const reason = buildBlockReason(action, timeoutMs);
-      audit({ decision: 'block', ruleId: 'dispatch.process.async_discipline_blocked', reason, event, context, ...llm });
+      audit({ decision: 'block', ruleId: 'dispatch.process.async_discipline_blocked', reason, event, context, ...vector });
       return { block: true, blockReason: reason };
     }
 
@@ -382,49 +408,32 @@ async function exists(path: string): Promise<boolean> {
   }
 }
 
-function providerHasModel(openclawConfig: Record<string, unknown>, provider: string, model: string): boolean {
+function providerHasApiKey(openclawConfig: Record<string, unknown>): boolean {
   const providers = (openclawConfig.models as Record<string, unknown> | undefined)?.providers as Record<string, unknown> | undefined;
-  const entry = providers?.[provider] as Record<string, unknown> | undefined;
-  const models = entry?.models;
-  if (Array.isArray(models)) {
-    return models.some(item => (typeof item === 'string' ? item : (item as Record<string, unknown>)?.id) === model);
-  }
-  return Boolean(models && typeof models === 'object' && Object.prototype.hasOwnProperty.call(models, model));
+  const entry = providers?.['volcengine-ark'] as Record<string, unknown> | undefined;
+  return Boolean(process.env.ARK_API_KEY || entry?.apiKey);
 }
 
-async function assertLlmModelConfigured(env: GeneratorEnv, guardConfig: AcoFileConfig['asyncDisciplineGuard']): Promise<void> {
-  const llm = guardConfig?.llmJudgement ?? DEFAULT_ASYNC_DISCIPLINE_CONFIG.llmJudgement;
-  const provider = llm.provider ?? DEFAULT_ASYNC_DISCIPLINE_CONFIG.llmJudgement.provider;
-  const model = llm.model ?? DEFAULT_ASYNC_DISCIPLINE_CONFIG.llmJudgement.model;
+async function assertVectorProviderConfigured(env: GeneratorEnv, guardConfig: AcoFileConfig['asyncDisciplineGuard']): Promise<void> {
+  const vector = guardConfig?.vectorJudgement ?? DEFAULT_ASYNC_DISCIPLINE_CONFIG.vectorJudgement;
+  if (vector.enabled === false) return;
   if (!env.openclawConfigPath) {
     throw new Error(`aco init failed: OpenClaw config was not detected.
 Next steps:
   1. If you use OpenClaw, set OPENCLAW_HOME to the directory that contains openclaw.json, then rerun aco init.
   2. If you only want to see ACO behavior, run aco demo. It does not require OpenClaw, providers, or network access.
-  3. If you want init without the async discipline LLM guard, create aco.config.json with:
-     { "asyncDisciplineGuard": { "enabled": false } }`);
+  3. If you want init without the async discipline vector guard, create aco.config.json with:
+     { "asyncDisciplineGuard": { "vectorJudgement": { "enabled": false } } }`);
   }
   const raw = await readFile(env.openclawConfigPath, 'utf-8');
   const openclawConfig = JSON.parse(raw) as Record<string, unknown>;
-  if (!providerHasModel(openclawConfig, provider, model)) {
-    throw new Error(`aco init failed: asyncDisciplineGuard.llmJudgement model ${provider}/${model} is not present in ${env.openclawConfigPath}.
+  if (!providerHasApiKey(openclawConfig)) {
+    throw new Error(`aco init failed: asyncDisciplineGuard.vectorJudgement requires volcengine-ark API key for ${SEMANTIC_VECTOR_MODEL}.
 Next steps:
-  1. Add the provider/model to openclaw.json under models.providers.${provider}.models, then rerun aco init.
-     Example:
-     {
-       "models": {
-         "providers": {
-           "${provider}": {
-             "models": ["${model}"]
-           }
-         }
-       }
-     }
-  2. Or choose an existing model in aco.config.json:
-     { "asyncDisciplineGuard": { "llmJudgement": { "provider": "<provider>", "model": "<model>" } } }
-  3. Or disable this guard for first setup:
-     { "asyncDisciplineGuard": { "enabled": false } }
-  4. To see ACO without provider setup, run aco demo.`);
+  1. Set ARK_API_KEY, or configure models.providers.volcengine-ark.apiKey in ${env.openclawConfigPath}.
+  2. Or disable this guard for first setup:
+     { "asyncDisciplineGuard": { "vectorJudgement": { "enabled": false } } }
+  3. To see ACO without provider setup, run aco demo.`);
   }
 }
 
@@ -435,12 +444,12 @@ const asyncDisciplineGuardGenerator: Generator = {
   async validate(env: GeneratorEnv, config: AcoFileConfig | null): Promise<void> {
     const guardConfig = config?.asyncDisciplineGuard ?? {};
     if (guardConfig.enabled === false) return;
-    await assertLlmModelConfigured(env, guardConfig);
+    await assertVectorProviderConfigured(env, guardConfig);
   },
   async generate(env: GeneratorEnv, config: AcoFileConfig | null, force: boolean): Promise<void> {
     const guardConfig = config?.asyncDisciplineGuard ?? {};
     if (guardConfig.enabled === false) return;
-    await assertLlmModelConfigured(env, guardConfig);
+    await assertVectorProviderConfigured(env, guardConfig);
 
     const outputPath = join(env.openclawHome, 'extensions', 'aco-async-discipline-guard', 'index.js');
     if ((await exists(outputPath)) && !force) {
@@ -454,7 +463,7 @@ const asyncDisciplineGuardGenerator: Generator = {
       enabled: guardConfig.enabled,
       maxBlockingTimeoutMs: guardConfig.maxBlockingTimeoutMs,
       blockingActions: guardConfig.blockingActions,
-      llmJudgement: guardConfig.llmJudgement,
+      vectorJudgement: guardConfig.vectorJudgement,
       degradedRecoveryWindowMs: guardConfig.degradedRecoveryWindowMs ?? guardConfig.degradedRecoverIntervalMs,
       auditLogPath: join(env.openclawHome, 'workspace', 'logs', 'dispatch-guard-events.jsonl'),
     });

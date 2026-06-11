@@ -13,11 +13,11 @@ import type {
   AgentSlot,
   AuditEvent,
   DispatchRule,
-  LLMProvider,
   RoleTag,
   RuleAction,
   Task,
 } from '../types/index.js';
+import { matchSemanticVector, type SemanticVectorMatch } from '../shared/semantic-vector-classifier.js';
 
 export interface DispatchDecision {
   allowed: boolean;
@@ -28,18 +28,25 @@ export interface DispatchDecision {
 
 export interface ClassifyResult {
   taskType: string;
-  source: 'declared' | 'llm' | 'fallback';
+  source: 'declared' | 'embedding' | 'fallback';
+  score?: number;
+  confidenceBand?: SemanticVectorMatch['confidenceBand'];
 }
+
+export type TaskTypeVectorClassifier = (input: {
+  text: string;
+  domain: string;
+}) => Promise<SemanticVectorMatch>;
 
 export class RuleEngine {
   private rules: DispatchRule[] = [];
   private defaultPolicy: 'open' | 'closed' = 'open';
-  private llmProvider?: LLMProvider;
+  private vectorClassifier: TaskTypeVectorClassifier = matchSemanticVector;
 
   constructor(private eventBus: EventBus) {}
 
-  setLLMProvider(provider: LLMProvider): void {
-    this.llmProvider = provider;
+  setVectorClassifier(classifier: TaskTypeVectorClassifier): void {
+    this.vectorClassifier = classifier;
   }
 
   setDefaultPolicy(policy: 'open' | 'closed'): void {
@@ -79,22 +86,31 @@ export class RuleEngine {
 
   /**
    * FR-B01 AC5/AC6: 任务类型分类
-   * 优先级：声明式标注 > LLM 语义分类 > 默认 fallback
+   * 优先级：声明式标注 > 向量 cosine 语义分类 > 默认 fallback
    */
   async classifyTask(task: Task, declaredType?: string): Promise<ClassifyResult> {
-    // 声明式标注
     if (declaredType) {
       return { taskType: declaredType, source: 'declared' };
     }
 
-    // LLM 语义分类
-    if (this.llmProvider) {
-      const categories = ['spec', 'code', 'audit', 'ux', 'readme', 'data-ops', 'research', 'architecture'];
-      const result = await this.llmProvider.classify(task.prompt, categories);
-      return { taskType: result, source: 'llm' };
+    let match: SemanticVectorMatch;
+    try {
+      match = await this.vectorClassifier({
+        text: task.prompt,
+        domain: 'dispatch-task-type',
+      });
+    } catch {
+      return { taskType: 'unknown', source: 'fallback' };
+    }
+    if (match.ok && match.label) {
+      return {
+        taskType: match.label,
+        source: 'embedding',
+        score: match.score,
+        confidenceBand: match.confidenceBand,
+      };
     }
 
-    // Fallback
     return { taskType: 'unknown', source: 'fallback' };
   }
 

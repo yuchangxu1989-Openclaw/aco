@@ -18,7 +18,7 @@ describe('generateAsyncDisciplineGuardPlugin', () => {
     expect(output).toContain('aco-async-discipline-guard');
   });
 
-  it('registers before_prompt_build and async before_tool_call hooks (FR-K01 AC1/AC4 + FR-K02 AC14)', () => {
+  it('registers before_prompt_build and async before_tool_call hooks', () => {
     expect(output).toContain("api.on('before_prompt_build'");
     expect(output).toContain("api.on('before_tool_call'");
     expect(output).toContain('async function(event, context)');
@@ -27,7 +27,7 @@ describe('generateAsyncDisciplineGuardPlugin', () => {
     expect(output).toContain("msg.role !== 'user'");
   });
 
-  it('blocks only process calls with configured blocking actions and threshold (FR-K01 AC1/AC2/AC7/AC10)', () => {
+  it('blocks only process calls with configured blocking actions and threshold', () => {
     expect(output).toContain("toolName !== 'process'");
     expect(output).toContain('blockingActions');
     expect(output).toContain('timeoutMs < cfg.maxBlockingTimeoutMs');
@@ -36,42 +36,49 @@ describe('generateAsyncDisciplineGuardPlugin', () => {
     expect(output).toContain('blockReason');
   });
 
-  it('uses LLM judgement and removes keyword exemption path (FR-K02 AC1/AC6/P1)', () => {
-    expect(output).toContain('llmIntentJudgement');
-    expect(output).toContain('LLM_INTENT_JUDGEMENT_PROMPT_V1');
-    expect(output).toContain('asyncDisciplineGuard.llmJudgement');
+  it('uses Ark vector judgement and removes keyword and LLM exemption paths', () => {
+    expect(output).toContain('vectorIntentJudgement');
+    expect(output).toContain('VECTOR_DB');
+    expect(output).toContain('doubao-embedding-vision-251215');
+    expect(output).toContain('/embeddings/multimodal');
+    expect(output).toContain('cfg.vectorJudgement');
+    expect(output).not.toContain('llmIntentJudgement');
+    expect(output).not.toContain('chat.complete');
+    expect(output).not.toContain('/chat/completions');
     expect(output).not.toContain('findExemptKeyword');
     expect(output).not.toContain('userExemptKeywords');
     expect(output).not.toContain('exemptedSessions');
   });
 
-  it('writes async discipline audit schema with LLM fields (FR-K02 AC7/AC10)', () => {
+  it('writes async discipline audit schema with vector fields', () => {
     expect(output).toContain('dispatch-guard-events.jsonl');
     expect(output).toContain("rule: 'async-discipline'");
     expect(output).toContain("eventType: 'dispatch.process.async_discipline'");
     expect(output).toContain('exemptKeyword');
     expect(output).toContain('triggerKeyword');
     expect(output).toContain('recentUserMessageHash');
-    expect(output).toContain('llmVerdict');
-    expect(output).toContain('llmLatencyMs');
-    expect(output).toContain('llmPromptVersion');
+    expect(output).toContain('vectorVerdict');
+    expect(output).toContain('vectorLatencyMs');
+    expect(output).toContain('vectorModel');
   });
 
-  it('supports disabled, degraded, and recovery decisions with degradedAt timestamp (FR-K03)', () => {
+  it('supports disabled, degraded, recovery, and vector-unavailable allow decisions', () => {
     expect(output).toContain('bypass_disabled');
     expect(output).toContain('bypass_degraded');
     expect(output).toContain('recovery_attempt');
     expect(output).toContain('let degradedAt = null');
+    expect(output).toContain("vectorVerdict !== 'deny'");
+    expect(output).toContain('without LLM fallback');
     expect(output).not.toContain('degraded = true');
   });
 
-  it('does not reference run-watchdog state or completion queues (FR-K01 AC9)', () => {
+  it('does not reference run-watchdog state or completion queues', () => {
     expect(output).not.toContain('run-watchdog-state');
     expect(output).not.toContain('queueAutoAdvanceNotice');
     expect(output).not.toContain('consumeAutoAdvanceNotice');
   });
 
-  it('keeps DEFAULT_CONFIG complete when caller passes explicit undefined fields (P1 regression)', () => {
+  it('keeps DEFAULT_CONFIG complete when caller passes explicit undefined fields', () => {
     const cases = [
       generateAsyncDisciplineGuardPlugin(),
       generateAsyncDisciplineGuardPlugin({ enabled: undefined }),
@@ -79,7 +86,7 @@ describe('generateAsyncDisciplineGuardPlugin', () => {
         enabled: undefined,
         maxBlockingTimeoutMs: undefined,
         blockingActions: undefined,
-        llmJudgement: { enabled: undefined, provider: undefined, model: undefined, timeoutMs: undefined },
+        vectorJudgement: { enabled: undefined, timeoutMs: undefined },
         degradedRecoveryWindowMs: undefined,
       }),
     ];
@@ -89,17 +96,17 @@ describe('generateAsyncDisciplineGuardPlugin', () => {
       expect(generated).toContain('"maxBlockingTimeoutMs": 5000');
       expect(generated).toContain('"blockingActions"');
       expect(generated).toContain('"degradedRecoveryWindowMs": 300000');
-      expect(generated).toContain('"llmJudgement"');
-      expect(generated).toContain('"provider": "penguin-main"');
-      expect(generated).toContain('"model": "claude-opus-4-7"');
+      expect(generated).toContain('"vectorJudgement"');
+      expect(generated).toContain('"timeoutMs": 8000');
+      expect(generated).not.toContain('"llmJudgement"');
     }
   });
 
-  it('keeps DEFAULT_CONFIG complete when caller passes partial config (P1 regression)', () => {
+  it('keeps DEFAULT_CONFIG complete when caller passes partial config', () => {
     const generated = generateAsyncDisciplineGuardPlugin({
       enabled: false,
       blockingActions: ['poll'],
-      llmJudgement: { timeoutMs: 2500 },
+      vectorJudgement: { timeoutMs: 2500 },
     });
 
     expect(generated).toContain('"enabled": false');
@@ -107,10 +114,7 @@ describe('generateAsyncDisciplineGuardPlugin', () => {
     expect(generated).toContain('"blockingActions"');
     expect(generated).toContain('"poll"');
     expect(generated).toContain('"degradedRecoveryWindowMs": 300000');
-    expect(generated).toContain('"llmJudgement"');
-    expect(generated).toContain('"enabled": true');
-    expect(generated).toContain('"provider": "penguin-main"');
-    expect(generated).toContain('"model": "claude-opus-4-7"');
+    expect(generated).toContain('"vectorJudgement"');
     expect(generated).toContain('"timeoutMs": 2500');
   });
 
@@ -118,42 +122,36 @@ describe('generateAsyncDisciplineGuardPlugin', () => {
     const custom = generateAsyncDisciplineGuardPlugin({
       maxBlockingTimeoutMs: 9000,
       blockingActions: ['poll'],
-      llmJudgement: { provider: 'penguin-main', model: 'claude-opus-4-7', timeoutMs: 3000 },
+      vectorJudgement: { timeoutMs: 3000 },
       auditLogPath: '/tmp/dispatch-guard-events.jsonl',
       pluginName: 'custom-async-guard',
     });
 
     expect(custom).toContain('9000');
-    expect(custom).toContain('claude-opus-4-7');
+    expect(custom).toContain('"timeoutMs": 3000');
     expect(custom).toContain('/tmp/dispatch-guard-events.jsonl');
     expect(custom).toContain('custom-async-guard');
-  });
-
-  it('generated plugin accepts object-style OpenClaw provider models', () => {
-    const generated = generateAsyncDisciplineGuardPlugin();
-    expect(generated).toContain('Object.prototype.hasOwnProperty.call(models, model)');
   });
 });
 
 describe('async discipline generator registry', () => {
-  it('registers async-discipline-guard-plugin for aco init (FR-K01 AC11)', () => {
+  it('registers async-discipline-guard-plugin for aco init', () => {
     expect(getGenerators().map(g => g.name)).toContain('async-discipline-guard-plugin');
     const item = listGenerators().find(g => g.name === 'async-discipline-guard-plugin');
     expect(item).toBeDefined();
     expect(item?.description).toContain('async discipline');
   });
 
-  it('accepts object-style models in OpenClaw config during init generation', async () => {
+  it('accepts volcengine-ark api key in OpenClaw config during init generation', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'aco-async-guard-'));
     try {
       const openclawConfigPath = join(dir, 'openclaw.json');
       await writeFile(openclawConfigPath, JSON.stringify({
         models: {
           providers: {
-            'penguin-main': {
-              models: {
-                'claude-opus-4-7': {},
-              },
+            'volcengine-ark': {
+              apiKey: 'test-key',
+              baseUrl: 'https://ark.cn-beijing.volces.com/api/v3',
             },
           },
         },
@@ -169,6 +167,7 @@ describe('async discipline generator registry', () => {
 
       const plugin = await readFile(join(dir, 'extensions', 'aco-async-discipline-guard', 'index.js'), 'utf-8');
       expect(plugin).toContain('aco-async-discipline-guard');
+      expect(plugin).toContain('/embeddings/multimodal');
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

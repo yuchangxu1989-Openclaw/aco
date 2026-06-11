@@ -68,11 +68,9 @@ export interface AcoFileConfig {
     maxBlockingTimeoutMs?: number;
     /** 被视为阻塞等待语义的 process action 列表 (FR-K01 AC1) */
     blockingActions?: string[];
-    /** LLM 语义判定豁免配置 (FR-K02 AC1/AC9) */
-    llmJudgement?: {
+    /** 向量语义判定豁免配置 (FR-K02 AC1/AC9) */
+    vectorJudgement?: {
       enabled?: boolean;
-      provider?: string;
-      model?: string;
       timeoutMs?: number;
     };
     /** 守卫降级后自愈恢复窗口，单位毫秒，默认 300000 (FR-K03 AC4) */
@@ -411,21 +409,19 @@ export function validateConfig(
         errors.push({
           path: 'asyncDisciplineGuard.userExemptKeywords',
           message: 'asyncDisciplineGuard.userExemptKeywords is deprecated since FR-K02 and will be ignored',
-          suggestion: 'Remove this field. Exemption is judged by LLM semantic intent.',
+          suggestion: 'Remove this field. Exemption is judged by embedding cosine similarity.',
           severity: 'warning',
         });
       }
-      if (guard.llmJudgement !== undefined) {
-        if (typeof guard.llmJudgement !== 'object' || guard.llmJudgement === null) {
-          errors.push({ path: 'asyncDisciplineGuard.llmJudgement', message: 'asyncDisciplineGuard.llmJudgement must be an object', expected: 'object', actual: String(typeof guard.llmJudgement), severity: 'error' });
+      if (guard.vectorJudgement !== undefined) {
+        if (typeof guard.vectorJudgement !== 'object' || guard.vectorJudgement === null) {
+          errors.push({ path: 'asyncDisciplineGuard.vectorJudgement', message: 'asyncDisciplineGuard.vectorJudgement must be an object', expected: 'object', actual: String(typeof guard.vectorJudgement), severity: 'error' });
         } else {
-          const llm = guard.llmJudgement as Record<string, unknown>;
-          if (llm.enabled !== undefined && typeof llm.enabled !== 'boolean') {
-            errors.push({ path: 'asyncDisciplineGuard.llmJudgement.enabled', message: 'asyncDisciplineGuard.llmJudgement.enabled must be a boolean', expected: 'boolean', actual: String(typeof llm.enabled), severity: 'error' });
+          const vector = guard.vectorJudgement as Record<string, unknown>;
+          if (vector.enabled !== undefined && typeof vector.enabled !== 'boolean') {
+            errors.push({ path: 'asyncDisciplineGuard.vectorJudgement.enabled', message: 'asyncDisciplineGuard.vectorJudgement.enabled must be a boolean', expected: 'boolean', actual: String(typeof vector.enabled), severity: 'error' });
           }
-          validateNonEmptyString(errors, llm, 'asyncDisciplineGuard.llmJudgement.provider');
-          validateNonEmptyString(errors, llm, 'asyncDisciplineGuard.llmJudgement.model');
-          validateNumber(errors, llm, 'asyncDisciplineGuard.llmJudgement.timeoutMs', 1);
+          validateNumber(errors, vector, 'asyncDisciplineGuard.vectorJudgement.timeoutMs', 1);
         }
       }
     }
@@ -846,11 +842,9 @@ export function generateMinimalConfig(): string {
         enabled: true,
         maxBlockingTimeoutMs: 5000,
         blockingActions: ['poll', 'wait', 'log', 'list'],
-        llmJudgement: {
+        vectorJudgement: {
           enabled: true,
-          provider: 'penguin-main',
-          model: 'claude-opus-4-7',
-          timeoutMs: 5000,
+          timeoutMs: 8000,
         },
         degradedRecoveryWindowMs: 300000,
       },
@@ -949,11 +943,9 @@ export function generateAnnotatedConfig(): string {
     '    "enabled": true,',
     '    "maxBlockingTimeoutMs": 5000,',
     '    "blockingActions": ["poll", "wait", "log", "list"],',
-    '    "llmJudgement": {',
+    '    "vectorJudgement": {',
     '      "enabled": true,',
-    '      "provider": "penguin-main",',
-    '      "model": "claude-opus-4-7",',
-    '      "timeoutMs": 5000',
+    '      "timeoutMs": 8000',
     '    },',
     '    "degradedRecoveryWindowMs": 300000',
     '  },',

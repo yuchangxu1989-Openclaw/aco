@@ -8,6 +8,7 @@ import os from 'os';
 import path from 'path';
 import { execFile } from 'child_process';
 import { createRequire } from 'module';
+import { classifyByEmbedding, readEmbeddingConfig } from './embedding-classifier.js';
 
 const require = createRequire(import.meta.url);
 const {
@@ -150,54 +151,27 @@ function semanticYesFromRaw(rawResult = '' ) {
 const SEMANTIC_GATE_TIMEOUT_MS = 8000;
 
 /**
- * Reusable yes/no semantic check. Failures (config-missing / timeout / network /
- * non-2xx / unparseable) return matched=false with a reason so callers can fail
- * open. timeoutMs caps how long the call may block the caller.
+ * Reusable semantic check via embedding cosine similarity.
+ * Replaces the former LLM yes/no classification. Failures return matched=false
+ * with a reason so callers can fail open.
+ *
+ * @param {object} opts
+ * @param {string} opts.text - Text to classify
+ * @param {string} opts.vectorDb - Vector DB filename (in sevo/data/)
+ * @param {string} opts.positiveLabel - Label that means "yes/matched"
+ * @param {number} [opts.maxChars=2000] - Max chars to use from text
  */
-async function askSemanticYesNo({ systemPrompt, text, maxChars = 2000, timeoutMs = 360000 }) {
-  const llmCfg = resolveLlmConfig();
-  if (!llmCfg) return { matched: false, reason: 'llm_config_unavailable' };
-
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+async function askSemanticYesNo({ text, vectorDb, positiveLabel, maxChars = 2000 }) {
+  const snippet = String(text || '').slice(0, maxChars);
+  if (!snippet.trim()) return { matched: false, reason: 'empty_text' };
 
   try {
-    const resp = await fetch(buildChatEndpoint(llmCfg.baseUrl), {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${llmCfg.apiKey}`,
-      },
-      body: JSON.stringify({
-        model: llmCfg.model,
-        max_tokens: 4,
-        temperature: 0,
-        messages: [
-          {
-            role: 'system',
-            content: systemPrompt,
-          },
-          {
-            role: 'user',
-            content: String(text || '').slice(0, maxChars),
-          },
-        ],
-      }),
-      signal: controller.signal,
-    });
-
-    if (!resp.ok) return { matched: false, reason: `llm_http_${resp.status}` };
-
-    const data = await resp.json();
-    const rawResult = String(data.choices?.[0]?.message?.content || '').trim().toLowerCase();
-    const semanticYes = semanticYesFromRaw(rawResult);
-    if (semanticYes === true) return { matched: true, reason: 'llm_yes', rawResult: rawResult.slice(0, 40) };
-    if (semanticYes === false) return { matched: false, reason: 'llm_no', rawResult: rawResult.slice(0, 40) };
-    return { matched: false, reason: 'llm_unparseable_result', rawResult: rawResult.slice(0, 40) };
+    const result = await classifyByEmbedding(snippet, vectorDb);
+    if (!result.matched) return { matched: false, reason: 'embedding_no_match', score: result.score };
+    const matched = result.label === positiveLabel;
+    return { matched, reason: matched ? 'embedding_yes' : 'embedding_no', rawResult: result.label, score: result.score };
   } catch (e) {
-    return { matched: false, reason: String(e?.name || e?.message || e || 'llm_error') };
-  } finally {
-    clearTimeout(timeout);
+    return { matched: false, reason: String(e?.message || e || 'embedding_error') };
   }
 }
 
@@ -227,10 +201,10 @@ async function hasUserExemption(text = '') {
   const s = String(text || '');
   if (hasUserExemptionMarker(s)) return true;
   const semantic = await askSemanticYesNo({
-    systemPrompt: '你是派发准入分类器。判断这段 task prompt 是否包含用户明确授权跳过/豁免本次派发准入校验的指令（例如用户原话明确表示“我授权豁免”“跳过校验直接派”）。只有用户主动授权豁免才回答 yes；仅仅提到、讨论或解释“豁免”这个概念回答 no。只回答 yes 或 no。',
     text: s,
+    vectorDb: 'semantic-gate-vectors.json',
+    positiveLabel: 'has-mutation',
     maxChars: 2000,
-    timeoutMs: SEMANTIC_GATE_TIMEOUT_MS,
   });
   return semantic.matched === true;
 }
@@ -265,8 +239,9 @@ function uniquePathMatches(re, text) {
 
 async function hasSemanticProjectMutation(text = '') {
   return askSemanticYesNo({
-    systemPrompt: '你是派发准入分类器。判断任务是否要求修改 reports/ 目录之外的项目产物。项目产物包括代码、测试、产品/架构文档、插件逻辑、运行配置、发布脚本或构建产物。仅仅读取这些文件、审查这些文件，或只把结论写入 workspace/reports/，回答 no。只回答 yes 或 no。',
     text,
+    vectorDb: 'semantic-gate-vectors.json',
+    positiveLabel: 'has-mutation',
     maxChars: 2000,
   });
 }
@@ -356,8 +331,9 @@ function getBestSpecPathCheck(text = '') {
 
 async function hasSemanticSpecReference(text = '') {
   return askSemanticYesNo({
-    systemPrompt: '判断 prompt 是否明确要求子 Agent 在动手修改、实现、审计或发布前先读取其中给出的 spec/需求文档路径。只检查是否有“先读/先查阅/基于该 spec”等明确前置阅读要求；不要因为出现 FR/AC 编号或普通报告路径就回答 yes。只回答 yes 或 no。',
     text,
+    vectorDb: 'semantic-gate-vectors.json',
+    positiveLabel: 'has-mutation',
     maxChars: 2000,
   });
 }
@@ -389,10 +365,10 @@ function shouldInjectAuditGeneralizationCheck(label = '') {
 // 失败 fail-open=false（不注入门禁），保持注入的保守性。
 async function shouldInjectAcoPublishStrangerGate(prompt = '') {
   const semantic = await askSemanticYesNo({
-    systemPrompt: '你是任务分类器。判断这段任务是否要发布/对外 release 一个包或产物（例如 npm publish、打 release、对外分发安装包）。只有真正要执行发布动作回答 yes；只是开发、测试、写文档、内部构建回答 no。只回答 yes 或 no。',
     text: String(prompt || ''),
+    vectorDb: 'semantic-gate-vectors.json',
+    positiveLabel: 'has-mutation',
     maxChars: 2000,
-    timeoutMs: SEMANTIC_GATE_TIMEOUT_MS,
   });
   return semantic.matched === true;
 }
@@ -413,8 +389,9 @@ function saveReadmeAutodispatchState(state) {
 async function isUserVisibleFeatureChange(text = '', appendAuditEvent = null, context = {}) {
   const raw = String(text || '');
   const semanticCheck = await askSemanticYesNo({
-    systemPrompt: '这个任务是否涉及用户可见的功能变更？用户可见包括最终用户能感知的新能力、命令、配置项、API 行为、界面、安装/使用方式变化；纯内部重构、测试、格式化、依赖维护且不改变用户行为则不是。只回答 yes 或 no。',
     text: raw,
+    vectorDb: 'semantic-gate-vectors.json',
+    positiveLabel: 'user-visible-feature',
     maxChars: 2000,
   });
 
@@ -448,8 +425,9 @@ ${outcome}`;
   if (!ok || !isAudit) return false;
 
   const semanticCheck = await askSemanticYesNo({
-    systemPrompt: '这段 completion 文本是否明确表示审计/评审通过且没有 P0/P1/P2 阻断问题？只回答 yes 或 no。',
     text: textForPassCheck,
+    vectorDb: 'semantic-gate-vectors.json',
+    positiveLabel: 'audit-passed',
     maxChars: 2000,
   });
 
@@ -776,10 +754,10 @@ const HEALTH_SCAN_T1_BLOCK_REASON = '健康扫描任务必须由 T1 编码 Agent
 // 失败时 fail-open=false（不强制 T1），避免分类器抖动把普通任务误路由。
 async function isHealthScanTask(label = '', prompt = '') {
   const semantic = await askSemanticYesNo({
-    systemPrompt: '你是任务分类器。判断这段任务是否是“代码健康扫描/健康度巡检”类任务——即对一个代码库或模块做系统性的健康度、质量、风险全面扫描排查。只有系统性健康扫描回答 yes；普通的单点 bug 修复、功能开发、写文档、写需求、单文件审查回答 no。只回答 yes 或 no。',
     text: `label: ${String(label || '(none)')}\nprompt: ${String(prompt || '(none)')}`,
+    vectorDb: 'task-type-vectors.json',
+    positiveLabel: 'audit',
     maxChars: 2000,
-    timeoutMs: SEMANTIC_GATE_TIMEOUT_MS,
   });
   return semantic.matched === true;
 }
@@ -1125,79 +1103,23 @@ function extractTaskTypeFromClassifierResult(content, taskTypes) {
 }
 
 /**
- * PRIMARY classifier: LLM semantic judgement of task type.
- * Reads provider/model dynamically from openclaw.json (resolveLlmConfig).
- * 360s timeout via AbortController. Returns classifierFailed=true (with type=null)
- * on config-missing / timeout / network / non-2xx / unparseable result so the
- * caller can fail open. Never throws.
+ * PRIMARY classifier: Embedding cosine similarity for task type.
+ * Uses pre-computed vectors from task-type-vectors.json.
+ * Returns classifierFailed=true (with type=null) on embedding unavailable
+ * so the caller can fail open. Never throws.
  */
 async function classifyTaskTypeLLM(classifierLabel, prompt) {
   const promptSummary = (prompt || '').slice(0, 120);
-  let llmCfg;
+  const text = `label: ${classifierLabel || '(none)'}\nprompt: ${(prompt || '').slice(0, 500)}`;
+
   try {
-    llmCfg = resolveLlmConfig();
-  } catch (e) {
-    return {
-      type: null,
-      source: 'llm',
-      classifierFailed: true,
-      failureReason: 'llm_config_unavailable',
-      rawResult: String(e?.message || e).slice(0, 120),
-      promptSummary,
-    };
-  }
-  if (!llmCfg) {
-    return {
-      type: null,
-      source: 'llm',
-      classifierFailed: true,
-      failureReason: 'llm_config_unavailable',
-      promptSummary,
-    };
-  }
-
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 360000);
-  try {
-    const endpoint = buildChatEndpoint(llmCfg.baseUrl);
-    const promptSnippet = (prompt || '').slice(0, 500);
-    const roleTaskMap = getRoleTaskMap();
-    const classifierTaskTypes = getClassifierTaskTypes(roleTaskMap);
-    const classifierSystemPrompt = buildClassifierSystemPrompt(roleTaskMap);
-
-    const resp = await fetch(endpoint, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${llmCfg.apiKey}`,
-      },
-      body: JSON.stringify({
-        model: llmCfg.model,
-        max_tokens: 16,
-        temperature: 0,
-        messages: [
-          { role: 'system', content: classifierSystemPrompt },
-          { role: 'user', content: `label: ${classifierLabel || '(none)'}\nprompt: ${promptSnippet || '(none)'}` },
-        ],
-      }),
-      signal: controller.signal,
-    });
-
-    if (!resp.ok) {
-      return { type: null, source: 'llm', classifierFailed: true, failureReason: `llm_http_${resp.status}`, promptSummary: promptSnippet };
+    const result = await classifyByEmbedding(text, 'task-type-vectors.json');
+    if (!result.matched) {
+      return { type: null, source: 'embedding', classifierFailed: true, failureReason: 'embedding_no_match', score: result.score, promptSummary };
     }
-
-    const data = await resp.json();
-    const content = (data.choices?.[0]?.message?.content || '').trim().toLowerCase();
-    const matched = extractTaskTypeFromClassifierResult(content, classifierTaskTypes);
-    if (!matched) {
-      return { type: null, source: 'llm', classifierFailed: true, failureReason: 'llm_unparseable_result', rawResult: content.slice(0, 120), promptSummary: promptSnippet };
-    }
-    return { type: matched, source: 'llm', classifierFailed: false, confidence: null, rawResult: content.slice(0, 120), promptSummary: promptSnippet };
+    return { type: result.label, source: 'embedding', classifierFailed: false, confidence: result.confidence, score: result.score, rawResult: result.label, promptSummary };
   } catch (e) {
-    return { type: null, source: 'llm', classifierFailed: true, failureReason: String(e?.name || e?.message || e), promptSummary: (prompt || '').slice(0, 500) };
-  } finally {
-    clearTimeout(timeout);
+    return { type: null, source: 'embedding', classifierFailed: true, failureReason: String(e?.message || e || 'embedding_error'), promptSummary };
   }
 }
 
@@ -2219,10 +2141,10 @@ const agentDispatchGuardPlugin = {
                 // Fail-open=false (no warning) on classifier failure.
                 if (!estimatedCount) {
                   const bulkIntent = await askSemanticYesNo({
-                    systemPrompt: '你是数据运维任务分类器。判断这段任务是否要求对全量或大批量数据条目做处理/更新/迁移/清理（即一次性覆盖“全部/所有/全量”条目，而不是少量几条）。是大批量全量操作回答 yes；只处理少量、单条或明确小范围回答 no。只回答 yes 或 no。',
                     text: String(bulkCheckPrompt || ''),
+                    vectorDb: 'semantic-gate-vectors.json',
+                    positiveLabel: 'has-mutation',
                     maxChars: 2000,
-                    timeoutMs: SEMANTIC_GATE_TIMEOUT_MS,
                   });
                   if (bulkIntent.matched === true) {
                     estimatedCount = 1000; // default estimate when no number available
@@ -2337,10 +2259,10 @@ const agentDispatchGuardPlugin = {
             // /readme/i 会把只是顺带提到 readme 的任务误判，也漏判换措辞的文档任务。
             // 失败 fail-open=false（不注入规则），保持注入保守。
             const readmeIntent = await askSemanticYesNo({
-              systemPrompt: '你是任务分类器。判断这段任务的主要目标是否是撰写或更新面向用户的 README / 项目说明文档。只有任务目标确实是写/改 README 时回答 yes；只是顺带提到 readme、或任务目标是写代码/测试/需求/其他文档回答 no。只回答 yes 或 no。',
               text: String(taskPrompt || ''),
+              vectorDb: 'task-type-vectors.json',
+              positiveLabel: 'readme',
               maxChars: 2000,
-              timeoutMs: SEMANTIC_GATE_TIMEOUT_MS,
             });
             if (readmeIntent.matched === true) {
               appendAuditEvent({

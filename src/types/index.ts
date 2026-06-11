@@ -237,11 +237,6 @@ export interface NotificationChannel {
   enabled: boolean;
 }
 
-// --- LLM Interface ---
-
-export interface LLMProvider {
-  classify(prompt: string, categories: string[]): Promise<string>;
-}
 
 import type { KillImpactScanResult } from '../control/kill-impact-scan.js';
 

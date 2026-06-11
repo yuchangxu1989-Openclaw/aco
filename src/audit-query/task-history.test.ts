@@ -13,7 +13,7 @@ describe('TaskHistory (FR-E04)', () => {
 
   beforeEach(async () => {
     logger = new AuditLogger({ filePath: testFilePath });
-    auditQuery = new AuditQuery({ filePath: testFilePath, retentionDays: 30 });
+    auditQuery = new AuditQuery({ filePath: testFilePath, retentionDays: 365 });
     taskHistory = new TaskHistory(auditQuery);
   });
 

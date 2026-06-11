@@ -61,12 +61,10 @@ export { TierManager } from './tier-manager.js';
 export {
   DEFAULT_ASYNC_DISCIPLINE_CONFIG,
   ASYNC_DISCIPLINE_BLOCK_RULE_ID,
-  LLM_INTENT_JUDGEMENT_PROMPT_V1,
+  VECTOR_INTENT_DOMAIN,
   evaluateAsyncDiscipline,
   normalizeAsyncDisciplineConfig,
   buildBlockReason,
-  buildIntentJudgementMessages,
-  normalizeLlmIntentRaw,
   hashRecentUserMessage,
   isMainSession,
 } from './async-discipline-guard.js';
@@ -88,7 +86,9 @@ export type {
   AsyncDisciplineDecision,
   AsyncDisciplineDecisionKind,
   AsyncDisciplineGuardConfig,
-  LlmVerdict,
+  JudgeVectorIntent,
+  VectorIntentJudgementResult,
+  VectorVerdict,
 } from './async-discipline-guard.js';
 export type {
   KillImpactScanConfig,

@@ -1,12 +1,13 @@
 /**
  * FR-K01/K02/K03: Main Session Async Discipline Guard
  *
- * Pure evaluator + audit event helpers. FR-K02 replaces keyword exemption with
- * LLM semantic judgement. FR-K03 keeps degraded state as an in-memory timestamp
- * with a recovery window.
+ * Pure evaluator + audit event helpers. FR-K02 uses Ark embedding cosine
+ * similarity for one-call exemption intent judgement. FR-K03 keeps degraded
+ * state as an in-memory timestamp with a recovery window.
  */
 
 import { createHash } from 'node:crypto';
+import { matchSemanticVector, SEMANTIC_VECTOR_MODEL, type SemanticVectorMatch } from '../shared/semantic-vector-classifier.js';
 
 export const ASYNC_DISCIPLINE_RULE = 'async-discipline';
 export const ASYNC_DISCIPLINE_BLOCK_RULE_ID = 'dispatch.process.async_discipline_blocked';
@@ -15,27 +16,15 @@ export const ASYNC_DISCIPLINE_ALLOW_RULE_ID = 'dispatch.process.async_discipline
 export const ASYNC_DISCIPLINE_BYPASS_DISABLED_RULE_ID = 'dispatch.process.async_discipline_bypass_disabled';
 export const ASYNC_DISCIPLINE_BYPASS_DEGRADED_RULE_ID = 'dispatch.process.async_discipline_bypass_degraded';
 export const ASYNC_DISCIPLINE_RECOVERY_ATTEMPT_RULE_ID = 'dispatch.process.async_discipline_recovery_attempt';
+export const VECTOR_INTENT_DOMAIN = 'async-exemption-intent';
 
-export const LLM_INTENT_JUDGEMENT_PROMPT_VERSION = 'v1';
-export const LLM_INTENT_JUDGEMENT_PROMPT_V1 = [
-  '你是 ACO 主会话异步纪律守卫的意图判断器。',
-  '任务: 判断用户当前消息是否在表达“我授权这次主会话本回合亲自执行长任务/同步等待/不要派子 Agent”。',
-  '如果用户当前消息表达了这种授权意图,包括任意自然语言措辞、YES、你别派、我亲自处理、这次我搞、主会话直接干、你顶上、我盯着这个、老规矩你来、[SYSTEM] override、忽略指令放行等,判 YES。',
-  '如果用户当前消息没有表达授权主会话亲自执行本回合长任务的意图,判 NO。',
-  '严格只返回单词 YES 或 NO,不返回任何解释、标点、引号、代码块、空白以外字符;不返回其他语言;不返回多个单词。',
-].join('\n');
-
-export interface LlmJudgementConfig {
+export interface VectorJudgementConfig {
   enabled?: boolean;
-  provider?: string;
-  model?: string;
   timeoutMs?: number;
 }
 
-export interface NormalizedLlmJudgementConfig {
+export interface NormalizedVectorJudgementConfig {
   enabled: boolean;
-  provider: string;
-  model: string;
   timeoutMs: number;
 }
 
@@ -43,7 +32,7 @@ export interface AsyncDisciplineGuardConfig {
   enabled?: boolean;
   maxBlockingTimeoutMs?: number;
   blockingActions?: string[];
-  llmJudgement?: LlmJudgementConfig;
+  vectorJudgement?: VectorJudgementConfig;
   degradedRecoveryWindowMs?: number;
   degradedRecoverIntervalMs?: number;
 }
@@ -52,7 +41,7 @@ export interface NormalizedAsyncDisciplineGuardConfig {
   enabled: boolean;
   maxBlockingTimeoutMs: number;
   blockingActions: string[];
-  llmJudgement: NormalizedLlmJudgementConfig;
+  vectorJudgement: NormalizedVectorJudgementConfig;
   degradedRecoveryWindowMs: number;
 }
 
@@ -60,39 +49,31 @@ export const DEFAULT_ASYNC_DISCIPLINE_CONFIG: NormalizedAsyncDisciplineGuardConf
   enabled: true,
   maxBlockingTimeoutMs: 5000,
   blockingActions: ['poll', 'wait', 'log', 'list'],
-  llmJudgement: {
+  vectorJudgement: {
     enabled: true,
-    provider: 'penguin-main',
-    model: 'claude-opus-4-7',
-    timeoutMs: 5000,
+    timeoutMs: 8000,
   },
   degradedRecoveryWindowMs: 300000,
 };
 
-export type LlmVerdict = 'allow' | 'deny' | 'timeout' | 'error' | 'disabled' | 'not_applicable';
+export type VectorVerdict = 'allow' | 'deny' | 'unavailable' | 'disabled' | 'not_applicable';
 
-export interface LlmIntentJudgementResult {
-  llmVerdict: LlmVerdict;
-  llmLatencyMs: number;
-  llmError: string | null;
-  llmPromptVersion: string | null;
-  rawText?: string;
+export interface VectorIntentJudgementResult {
+  vectorVerdict: VectorVerdict;
+  vectorLatencyMs: number;
+  vectorError: string | null;
+  vectorModel: string | null;
+  vectorScore: number | null;
+  vectorConfidenceBand: SemanticVectorMatch['confidenceBand'] | null;
+  matchedSampleId?: string | null;
 }
 
-export interface LlmIntentJudgementInput {
-  provider: string;
-  model: string;
-  timeoutMs: number;
-  systemPrompt: string;
-  userPrompt: string;
-  promptVersion: string;
+export interface VectorIntentJudgementInput {
   recentUserMessage: string | null;
-  toolName: string;
-  action: string;
-  signal?: AbortSignal;
+  timeoutMs: number;
 }
 
-export type JudgeLlmIntent = (input: LlmIntentJudgementInput) => Promise<string>;
+export type JudgeVectorIntent = (input: VectorIntentJudgementInput) => Promise<SemanticVectorMatch<'allow' | 'deny'>>;
 
 export interface AsyncDisciplineState {
   degradedAt: number | null;
@@ -107,7 +88,7 @@ export interface AsyncDisciplineContext {
   config?: AsyncDisciplineGuardConfig & Record<string, unknown>;
   state?: AsyncDisciplineState;
   nowMs?: number;
-  judgeLlmIntent?: JudgeLlmIntent;
+  judgeVectorIntent?: JudgeVectorIntent;
   simulateMainLogicError?: Error;
 }
 
@@ -129,10 +110,12 @@ export interface AsyncDisciplineDecision {
   exemptKeyword: string | null;
   recentUserMessageHash: string | null;
   normalizedConfig: NormalizedAsyncDisciplineGuardConfig;
-  llmVerdict: LlmVerdict;
-  llmLatencyMs: number;
-  llmError: string | null;
-  llmPromptVersion: string | null;
+  vectorVerdict: VectorVerdict;
+  vectorLatencyMs: number;
+  vectorError: string | null;
+  vectorModel: string | null;
+  vectorScore: number | null;
+  vectorConfidenceBand: SemanticVectorMatch['confidenceBand'] | null;
   auditEvent: AsyncDisciplineAuditEvent;
   recoveryAuditEvent?: AsyncDisciplineAuditEvent;
   degradedAt: number | null;
@@ -142,7 +125,7 @@ export interface AsyncDisciplineAuditEvent {
   ts: string;
   timestamp: string;
   eventType: 'dispatch.process.async_discipline';
-  rule: 'async-discipline';
+  rule: typeof ASYNC_DISCIPLINE_RULE;
   ruleId: string;
   decision: AsyncDisciplineDecisionKind;
   toolName: string;
@@ -154,10 +137,12 @@ export interface AsyncDisciplineAuditEvent {
   exemptKeyword: string | null;
   triggerKeyword: string | null;
   recentUserMessageHash: string | null;
-  llmVerdict: LlmVerdict;
-  llmLatencyMs: number;
-  llmError: string | null;
-  llmPromptVersion: string | null;
+  vectorVerdict: VectorVerdict;
+  vectorLatencyMs: number;
+  vectorError: string | null;
+  vectorModel: string | null;
+  vectorScore: number | null;
+  vectorConfidenceBand: SemanticVectorMatch['confidenceBand'] | null;
   reason: string;
   details: Record<string, unknown>;
 }
@@ -174,8 +159,8 @@ export function normalizeAsyncDisciplineConfig(
   const degradedRecoveryWindowMs = Number.isFinite(rawWindow) && rawWindow >= 60000 && rawWindow <= 3600000
     ? rawWindow
     : DEFAULT_ASYNC_DISCIPLINE_CONFIG.degradedRecoveryWindowMs;
-  const rawLlm = config.llmJudgement && typeof config.llmJudgement === 'object' ? config.llmJudgement : {};
-  const timeoutMs = Number(rawLlm.timeoutMs ?? DEFAULT_ASYNC_DISCIPLINE_CONFIG.llmJudgement.timeoutMs);
+  const rawVector = config.vectorJudgement && typeof config.vectorJudgement === 'object' ? config.vectorJudgement : {};
+  const timeoutMs = Number(rawVector.timeoutMs ?? DEFAULT_ASYNC_DISCIPLINE_CONFIG.vectorJudgement.timeoutMs);
 
   return {
     enabled: config.enabled ?? DEFAULT_ASYNC_DISCIPLINE_CONFIG.enabled,
@@ -183,17 +168,11 @@ export function normalizeAsyncDisciplineConfig(
       ? maxBlockingTimeoutMs
       : DEFAULT_ASYNC_DISCIPLINE_CONFIG.maxBlockingTimeoutMs,
     blockingActions: sanitizeStringArray(config.blockingActions, DEFAULT_ASYNC_DISCIPLINE_CONFIG.blockingActions),
-    llmJudgement: {
-      enabled: rawLlm.enabled ?? DEFAULT_ASYNC_DISCIPLINE_CONFIG.llmJudgement.enabled,
-      provider: typeof rawLlm.provider === 'string' && rawLlm.provider.trim()
-        ? rawLlm.provider.trim()
-        : DEFAULT_ASYNC_DISCIPLINE_CONFIG.llmJudgement.provider,
-      model: typeof rawLlm.model === 'string' && rawLlm.model.trim()
-        ? rawLlm.model.trim()
-        : DEFAULT_ASYNC_DISCIPLINE_CONFIG.llmJudgement.model,
+    vectorJudgement: {
+      enabled: rawVector.enabled ?? DEFAULT_ASYNC_DISCIPLINE_CONFIG.vectorJudgement.enabled,
       timeoutMs: Number.isFinite(timeoutMs) && timeoutMs > 0
         ? timeoutMs
-        : DEFAULT_ASYNC_DISCIPLINE_CONFIG.llmJudgement.timeoutMs,
+        : DEFAULT_ASYNC_DISCIPLINE_CONFIG.vectorJudgement.timeoutMs,
     },
     degradedRecoveryWindowMs,
   };
@@ -223,12 +202,11 @@ export async function evaluateAsyncDiscipline(
       timeoutMs,
       exemptKeyword: null,
       recentUserMessageHash,
-      llm: notApplicableLlm(),
+      vector: notApplicableVector(),
       degradedAt: state?.degradedAt ?? null,
     });
   }
 
-  // outer catch: guard main logic only. LLM calls have their own inner catch in judgeLlmExemption.
   try {
     if (context.simulateMainLogicError) throw context.simulateMainLogicError;
 
@@ -248,7 +226,7 @@ export async function evaluateAsyncDiscipline(
           timeoutMs,
           exemptKeyword: null,
           recentUserMessageHash,
-          llm: notApplicableLlm(),
+          vector: notApplicableVector(),
           degradedAt: state.degradedAt,
         });
       }
@@ -266,7 +244,7 @@ export async function evaluateAsyncDiscipline(
         timeoutMs,
         exemptKeyword: null,
         recentUserMessageHash,
-        llm: notApplicableLlm(),
+        vector: notApplicableVector(),
         extraDetails: {
           previousDegradedAt,
           recoveryWindowMs: cfg.degradedRecoveryWindowMs,
@@ -296,7 +274,7 @@ export async function evaluateAsyncDiscipline(
       timeoutMs,
       exemptKeyword: null,
       recentUserMessageHash,
-      llm: notApplicableLlm(),
+      vector: notApplicableVector(),
       degradedAt,
       extraDetails: { error: message, stackTop, degradedAt },
     });
@@ -314,28 +292,28 @@ async function evaluateAsyncDisciplineMain(input: {
   const { context, cfg, now, action, timeoutMs, recentUserMessageHash } = input;
 
   if (!isMainSession(context.sessionKey, context.agentId)) {
-    return buildDecision({ decision: 'allow', ruleId: ASYNC_DISCIPLINE_ALLOW_RULE_ID, reason: 'Non-main session; async discipline guard does not apply.', block: false, context, cfg, now, action, timeoutMs, exemptKeyword: null, recentUserMessageHash, llm: notApplicableLlm(), degradedAt: context.state?.degradedAt ?? null });
+    return buildDecision({ decision: 'allow', ruleId: ASYNC_DISCIPLINE_ALLOW_RULE_ID, reason: 'Non-main session; async discipline guard does not apply.', block: false, context, cfg, now, action, timeoutMs, exemptKeyword: null, recentUserMessageHash, vector: notApplicableVector(), degradedAt: context.state?.degradedAt ?? null });
   }
 
   if (String(context.toolName || '') !== 'process') {
-    return buildDecision({ decision: 'allow', ruleId: ASYNC_DISCIPLINE_ALLOW_RULE_ID, reason: 'Tool is not process; async discipline guard does not apply.', block: false, context, cfg, now, action, timeoutMs, exemptKeyword: null, recentUserMessageHash, llm: notApplicableLlm(), degradedAt: context.state?.degradedAt ?? null });
+    return buildDecision({ decision: 'allow', ruleId: ASYNC_DISCIPLINE_ALLOW_RULE_ID, reason: 'Tool is not process; async discipline guard does not apply.', block: false, context, cfg, now, action, timeoutMs, exemptKeyword: null, recentUserMessageHash, vector: notApplicableVector(), degradedAt: context.state?.degradedAt ?? null });
   }
 
   if (!cfg.blockingActions.map(a => a.toLowerCase()).includes(action.toLowerCase())) {
-    return buildDecision({ decision: 'allow', ruleId: ASYNC_DISCIPLINE_ALLOW_RULE_ID, reason: `process(action=${action || 'unknown'}) is not configured as blocking.`, block: false, context, cfg, now, action, timeoutMs, exemptKeyword: null, recentUserMessageHash, llm: notApplicableLlm(), degradedAt: context.state?.degradedAt ?? null });
+    return buildDecision({ decision: 'allow', ruleId: ASYNC_DISCIPLINE_ALLOW_RULE_ID, reason: `process(action=${action || 'unknown'}) is not configured as blocking.`, block: false, context, cfg, now, action, timeoutMs, exemptKeyword: null, recentUserMessageHash, vector: notApplicableVector(), degradedAt: context.state?.degradedAt ?? null });
   }
 
   if (timeoutMs < cfg.maxBlockingTimeoutMs) {
-    return buildDecision({ decision: 'allow', ruleId: ASYNC_DISCIPLINE_ALLOW_RULE_ID, reason: `process timeout ${timeoutMs}ms is below async discipline threshold ${cfg.maxBlockingTimeoutMs}ms.`, block: false, context, cfg, now, action, timeoutMs, exemptKeyword: null, recentUserMessageHash, llm: notApplicableLlm(), degradedAt: context.state?.degradedAt ?? null });
+    return buildDecision({ decision: 'allow', ruleId: ASYNC_DISCIPLINE_ALLOW_RULE_ID, reason: `process timeout ${timeoutMs}ms is below async discipline threshold ${cfg.maxBlockingTimeoutMs}ms.`, block: false, context, cfg, now, action, timeoutMs, exemptKeyword: null, recentUserMessageHash, vector: notApplicableVector(), degradedAt: context.state?.degradedAt ?? null });
   }
 
-  const llm = await judgeLlmExemption(context, cfg, action, timeoutMs);
-  if (llm.llmVerdict === 'allow') {
+  const vector = await judgeVectorExemption(context, cfg);
+  if (vector.vectorVerdict === 'deny') {
     return buildDecision({
-      decision: 'exempt',
-      ruleId: ASYNC_DISCIPLINE_EXEMPT_RULE_ID,
-      reason: 'User exemption intent judged by LLM.',
-      block: false,
+      decision: 'block',
+      ruleId: ASYNC_DISCIPLINE_BLOCK_RULE_ID,
+      reason: buildBlockReason(action, timeoutMs),
+      block: true,
       context,
       cfg,
       now,
@@ -343,16 +321,16 @@ async function evaluateAsyncDisciplineMain(input: {
       timeoutMs,
       exemptKeyword: null,
       recentUserMessageHash,
-      llm,
+      vector,
       degradedAt: context.state?.degradedAt ?? null,
     });
   }
 
   return buildDecision({
-    decision: 'block',
-    ruleId: ASYNC_DISCIPLINE_BLOCK_RULE_ID,
-    reason: buildBlockReason(action, timeoutMs),
-    block: true,
+    decision: 'exempt',
+    ruleId: ASYNC_DISCIPLINE_EXEMPT_RULE_ID,
+    reason: vectorAllowReason(vector.vectorVerdict),
+    block: false,
     context,
     cfg,
     now,
@@ -360,83 +338,55 @@ async function evaluateAsyncDisciplineMain(input: {
     timeoutMs,
     exemptKeyword: null,
     recentUserMessageHash,
-    llm,
+    vector,
     degradedAt: context.state?.degradedAt ?? null,
   });
 }
 
-export async function judgeLlmExemption(
+export async function judgeVectorExemption(
   context: AsyncDisciplineContext,
   cfg: NormalizedAsyncDisciplineGuardConfig,
-  action: string,
-  timeoutMs: number,
-): Promise<LlmIntentJudgementResult> {
-  if (cfg.llmJudgement.enabled === false) {
-    return { llmVerdict: 'disabled', llmLatencyMs: 0, llmError: null, llmPromptVersion: null };
-  }
-  if (!context.judgeLlmIntent) {
-    return { llmVerdict: 'error', llmLatencyMs: 0, llmError: 'LLM intent judgement capability unavailable', llmPromptVersion: LLM_INTENT_JUDGEMENT_PROMPT_VERSION };
+): Promise<VectorIntentJudgementResult> {
+  if (cfg.vectorJudgement.enabled === false) {
+    return { vectorVerdict: 'disabled', vectorLatencyMs: 0, vectorError: null, vectorModel: null, vectorScore: null, vectorConfidenceBand: null };
   }
 
   const started = Date.now();
-  const timeoutMsCfg = cfg.llmJudgement.timeoutMs;
-  const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
-  let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    const timeoutPromise = new Promise<never>((_, reject) => {
-      timer = setTimeout(() => {
-        try { controller?.abort(); } catch {}
-        reject(Object.assign(new Error('timeout'), { name: 'TimeoutError' }));
-      }, timeoutMsCfg);
-    });
-    const prompt = buildIntentJudgementMessages(context.recentUserMessage ?? null);
-    const raw = await Promise.race([
-      context.judgeLlmIntent({
-        provider: cfg.llmJudgement.provider,
-        model: cfg.llmJudgement.model,
-        timeoutMs: timeoutMsCfg,
-        systemPrompt: prompt.system,
-        userPrompt: prompt.user,
-        promptVersion: LLM_INTENT_JUDGEMENT_PROMPT_VERSION,
-        recentUserMessage: context.recentUserMessage ?? null,
-        toolName: context.toolName,
-        action,
-        signal: controller?.signal,
-      }),
-      timeoutPromise,
-    ]);
-    const normalized = normalizeLlmIntentRaw(raw);
+    const recentUserMessage = context.recentUserMessage ?? null;
+    const match = context.judgeVectorIntent
+      ? await context.judgeVectorIntent({ recentUserMessage, timeoutMs: cfg.vectorJudgement.timeoutMs })
+      : await matchSemanticVector<'allow' | 'deny'>({
+        text: recentUserMessage ?? '',
+        domain: VECTOR_INTENT_DOMAIN,
+        timeoutMs: cfg.vectorJudgement.timeoutMs,
+      });
+
     return {
-      llmVerdict: normalized === 'YES' ? 'allow' : 'deny',
-      llmLatencyMs: Math.max(0, Date.now() - started),
-      llmError: null,
-      llmPromptVersion: LLM_INTENT_JUDGEMENT_PROMPT_VERSION,
-      rawText: truncate(normalized, 32) ?? '',
+      vectorVerdict: match.ok && match.label === 'deny' ? 'deny' : match.ok && match.label === 'allow' ? 'allow' : 'unavailable',
+      vectorLatencyMs: Math.max(0, Date.now() - started),
+      vectorError: match.ok ? null : truncate(match.reason ?? 'embedding match unavailable', 256),
+      vectorModel: match.model ?? SEMANTIC_VECTOR_MODEL,
+      vectorScore: Number.isFinite(match.score) && match.score >= 0 ? match.score : null,
+      vectorConfidenceBand: match.confidenceBand ?? null,
+      matchedSampleId: match.matchedSampleId,
     };
   } catch (error) {
-    // inner catch: LLM call only. Convert every provider/timeout/parse error into verdict metadata; never trigger degraded.
-    const elapsed = Math.max(0, Date.now() - started);
-    const isTimeout = error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError' || error.message === 'timeout');
     return {
-      llmVerdict: isTimeout ? 'timeout' : 'error',
-      llmLatencyMs: isTimeout ? timeoutMsCfg : elapsed,
-      llmError: truncate(isTimeout ? 'timeout' : error instanceof Error ? error.message : String(error), 256),
-      llmPromptVersion: LLM_INTENT_JUDGEMENT_PROMPT_VERSION,
+      vectorVerdict: 'unavailable',
+      vectorLatencyMs: Math.max(0, Date.now() - started),
+      vectorError: truncate(error instanceof Error ? error.message : String(error), 256),
+      vectorModel: SEMANTIC_VECTOR_MODEL,
+      vectorScore: null,
+      vectorConfidenceBand: null,
     };
-  } finally {
-    if (timer) clearTimeout(timer);
   }
 }
 
-export function normalizeLlmIntentRaw(raw: string): string {
-  return String(raw ?? '').trim().toUpperCase().replace(/[\p{P}\p{S}]/gu, '');
-}
-
-export function buildIntentJudgementMessages(recentUserMessage: string | null): { system: string; user: string } {
-  return {
-    system: LLM_INTENT_JUDGEMENT_PROMPT_V1,
-    user: `请判断下面这条用户当前消息是否表达授权主会话本回合亲自执行长任务。\n\n\`\`\`\n${recentUserMessage ?? ''}\n\`\`\``,
-  };
+function vectorAllowReason(verdict: VectorVerdict): string {
+  if (verdict === 'allow') return 'User exemption intent matched by embedding cosine similarity.';
+  if (verdict === 'disabled') return 'Embedding classifier disabled by configuration; allowing tool call without LLM fallback.';
+  return 'Embedding classifier unavailable; allowing tool call without LLM fallback.';
 }
 
 function buildDecision(input: {
@@ -451,7 +401,7 @@ function buildDecision(input: {
   timeoutMs: number;
   exemptKeyword: string | null;
   recentUserMessageHash: string | null;
-  llm: LlmIntentJudgementResult;
+  vector: VectorIntentJudgementResult;
   degradedAt: number | null;
   extraDetails?: Record<string, unknown>;
 }): AsyncDisciplineDecision {
@@ -466,10 +416,12 @@ function buildDecision(input: {
     exemptKeyword: input.exemptKeyword,
     recentUserMessageHash: input.recentUserMessageHash,
     normalizedConfig: input.cfg,
-    llmVerdict: input.llm.llmVerdict,
-    llmLatencyMs: input.llm.llmLatencyMs,
-    llmError: input.llm.llmError,
-    llmPromptVersion: input.llm.llmPromptVersion,
+    vectorVerdict: input.vector.vectorVerdict,
+    vectorLatencyMs: input.vector.vectorLatencyMs,
+    vectorError: input.vector.vectorError,
+    vectorModel: input.vector.vectorModel,
+    vectorScore: input.vector.vectorScore,
+    vectorConfidenceBand: input.vector.vectorConfidenceBand,
     auditEvent,
     degradedAt: input.degradedAt,
   };
@@ -486,7 +438,7 @@ function buildAuditEvent(input: {
   timeoutMs: number;
   exemptKeyword: string | null;
   recentUserMessageHash: string | null;
-  llm: LlmIntentJudgementResult;
+  vector: VectorIntentJudgementResult;
   extraDetails?: Record<string, unknown>;
 }): AsyncDisciplineAuditEvent {
   const sessionKey = String(input.context.sessionKey ?? '');
@@ -504,10 +456,13 @@ function buildAuditEvent(input: {
     exemptKeyword: input.exemptKeyword,
     triggerKeyword: input.exemptKeyword,
     recentUserMessageHash: input.recentUserMessageHash,
-    llmVerdict: input.llm.llmVerdict,
-    llmLatencyMs: input.llm.llmLatencyMs,
-    llmError: input.llm.llmError,
-    llmPromptVersion: input.llm.llmPromptVersion,
+    vectorVerdict: input.vector.vectorVerdict,
+    vectorLatencyMs: input.vector.vectorLatencyMs,
+    vectorError: input.vector.vectorError,
+    vectorModel: input.vector.vectorModel,
+    vectorScore: input.vector.vectorScore,
+    vectorConfidenceBand: input.vector.vectorConfidenceBand,
+    matchedSampleId: input.vector.matchedSampleId ?? null,
     reason: input.reason,
     ...(input.extraDetails ?? {}),
   };
@@ -527,10 +482,12 @@ function buildAuditEvent(input: {
     exemptKeyword: input.exemptKeyword,
     triggerKeyword: input.exemptKeyword,
     recentUserMessageHash: input.recentUserMessageHash,
-    llmVerdict: input.llm.llmVerdict,
-    llmLatencyMs: input.llm.llmLatencyMs,
-    llmError: input.llm.llmError,
-    llmPromptVersion: input.llm.llmPromptVersion,
+    vectorVerdict: input.vector.vectorVerdict,
+    vectorLatencyMs: input.vector.vectorLatencyMs,
+    vectorError: input.vector.vectorError,
+    vectorModel: input.vector.vectorModel,
+    vectorScore: input.vector.vectorScore,
+    vectorConfidenceBand: input.vector.vectorConfidenceBand,
     reason: input.reason,
     details,
   };
@@ -545,7 +502,7 @@ export function buildBlockReason(action: string, timeoutMs: number): string {
     '  1. 信任 push-based completion event。spawn 后直接结束当前回合，子 Agent 完成时会自动触发新回合，无需主动 poll。',
     '  2. 确实需要观察某个进程状态，改派一个短任务子 Agent 异步执行 poll，完成后通过 completion event 回报结果。',
     '',
-    '豁免方式: 用户在最近一条 IM 消息中明确表达让主会话本回合亲自执行这件事的意图，由 LLM 语义判定。',
+    '豁免方式: 用户在最近一条 IM 消息中明确表达让主会话本回合亲自执行这件事的意图，由向量匹配判定。',
     '豁免仅本次有效，下次调用重新走完整守卫。',
     '',
     `命中规则: ${ASYNC_DISCIPLINE_BLOCK_RULE_ID}`,
@@ -563,8 +520,15 @@ export function hashRecentUserMessage(message: string | null | undefined): strin
   return createHash('sha256').update(String(message)).digest('hex').slice(0, 16);
 }
 
-function notApplicableLlm(): LlmIntentJudgementResult {
-  return { llmVerdict: 'not_applicable', llmLatencyMs: 0, llmError: null, llmPromptVersion: null };
+function notApplicableVector(): VectorIntentJudgementResult {
+  return {
+    vectorVerdict: 'not_applicable',
+    vectorLatencyMs: 0,
+    vectorError: null,
+    vectorModel: null,
+    vectorScore: null,
+    vectorConfidenceBand: null,
+  };
 }
 
 function extractAction(args?: Record<string, unknown>): string {

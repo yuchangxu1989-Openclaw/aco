@@ -116,15 +116,15 @@ export async function auditCommand(args: string[]): Promise<number> {
     const summary = summarizeAsyncDiscipline(limited);
     console.log(`Async discipline audit — ${limited.length} entries`);
     console.log(`block=${summary.block} allow=${summary.allow} exempt=${summary.exempt} bypass_disabled=${summary.bypass_disabled} bypass_degraded=${summary.bypass_degraded} recovery_attempt=${summary.recovery_attempt}`);
-    console.log(`llmVerdict allow=${summary.llmVerdict_allow} deny=${summary.llmVerdict_deny} timeout=${summary.llmVerdict_timeout} error=${summary.llmVerdict_error} disabled=${summary.llmVerdict_disabled} not_applicable=${summary.llmVerdict_not_applicable}`);
+    console.log(`vectorVerdict allow=${summary.vectorVerdict_allow} deny=${summary.vectorVerdict_deny} unavailable=${summary.vectorVerdict_unavailable} disabled=${summary.vectorVerdict_disabled} not_applicable=${summary.vectorVerdict_not_applicable}`);
     console.log('─'.repeat(80));
-    const headers = ['Time', 'Decision', 'LLM', 'Action', 'Timeout', 'Agent', 'Reason'];
+    const headers = ['Time', 'Decision', 'Vector', 'Action', 'Timeout', 'Agent', 'Reason'];
     const rows = limited.map(e => {
       const details = e.details ?? {};
       return [
         e.timestamp.slice(11, 19),
         String(details.decision ?? '-'),
-        String(details.llmVerdict ?? '-'),
+        String(details.vectorVerdict ?? '-'),
         String(details.action ?? '-'),
         String(details.timeoutMs ?? '-'),
         e.agentId ?? '-',
@@ -174,18 +174,17 @@ function summarizeAsyncDiscipline(entries: Array<{ details?: Record<string, unkn
     bypass_disabled: 0,
     bypass_degraded: 0,
     recovery_attempt: 0,
-    llmVerdict_allow: 0,
-    llmVerdict_deny: 0,
-    llmVerdict_timeout: 0,
-    llmVerdict_error: 0,
-    llmVerdict_disabled: 0,
-    llmVerdict_not_applicable: 0,
+    vectorVerdict_allow: 0,
+    vectorVerdict_deny: 0,
+    vectorVerdict_unavailable: 0,
+    vectorVerdict_disabled: 0,
+    vectorVerdict_not_applicable: 0,
   };
   for (const entry of entries) {
     const decision = String(entry.details?.decision ?? 'allow');
     summary[decision] = (summary[decision] ?? 0) + 1;
-    const llmVerdict = String(entry.details?.llmVerdict ?? 'not_applicable');
-    summary[`llmVerdict_${llmVerdict}`] = (summary[`llmVerdict_${llmVerdict}`] ?? 0) + 1;
+    const vectorVerdict = String(entry.details?.vectorVerdict ?? 'not_applicable');
+    summary[`vectorVerdict_${vectorVerdict}`] = (summary[`vectorVerdict_${vectorVerdict}`] ?? 0) + 1;
   }
   return summary;
 }

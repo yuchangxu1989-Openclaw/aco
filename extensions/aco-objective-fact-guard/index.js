@@ -5,6 +5,7 @@
 
 import fs from 'fs';
 import path from 'path';
+import { classifyByEmbedding } from '../aco-dispatch-guard/embedding-classifier.js';
 
 const OBJECTIVE_FACT_GUARD_GLOBAL_KEY = Symbol.for('openclaw.aco-objective-fact-guard.instance');
 const objectiveFactGuardGlobal = globalThis[OBJECTIVE_FACT_GUARD_GLOBAL_KEY] || (globalThis[OBJECTIVE_FACT_GUARD_GLOBAL_KEY] = {
@@ -121,90 +122,33 @@ class FactGuardLRUCache {
 
 /**
  * Read LLM config from openclaw.json for classification calls.
+ * @deprecated Kept for config resolution compatibility; actual classification uses embedding.
  */
 function readFactGuardLlmConfig(configPath) {
-  try {
-    const cfgPath = configPath || path.resolve(path.dirname(new URL(import.meta.url).pathname), '../../openclaw.json');
-    const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
-    const providers = cfg?.models?.providers || {};
-
-    for (const p of Object.values(providers)) {
-      if (!p.apiKey || !p.baseUrl) continue;
-      const models = Array.isArray(p.models) ? p.models : [];
-      const chatModel = models.find(m => m.id && !m.id.includes('thinking') && !m.id.includes('image'));
-      if (chatModel) {
-        return {
-          baseUrl: p.baseUrl.replace(/\/+$/, ''),
-          apiKey: p.apiKey,
-          model: chatModel.id,
-        };
-      }
-    }
-    return null;
-  } catch {
-    return null;
-  }
+  return null;
 }
 
 /**
- * Detect if message content is a task status report using LLM with LRU cache.
+ * Detect if message content is a task status report using embedding cosine similarity.
  * Returns true if the message is a status report, false otherwise.
- * Falls back to false (allow) on LLM failure.
+ * Falls back to false (allow) on embedding failure.
  */
 async function isTaskStatusReport(content, resolvedConfig, cache) {
   if (!content || content.length < 20) return false;
 
-  // Use first 300 chars as cache key (sufficient for classification)
   const snippet = content.slice(0, 300);
   const cacheKey = snippet;
   const cached = cache.get(cacheKey);
   if (cached !== undefined) return cached;
 
-  const llmConfig = readFactGuardLlmConfig(resolvedConfig.paths.openclawConfig);
-  if (!llmConfig) return false; // fail-open: no LLM = allow
-
   try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), resolvedConfig.llm.statusDetection.timeoutMs);
-
-    const base = llmConfig.baseUrl;
-    const chatUrl = base.endsWith('/v1') || base.includes('/v1/')
-      ? `${base}/chat/completions`
-      : `${base}/v1/chat/completions`;
-
-    const response = await fetch(chatUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${llmConfig.apiKey}`,
-      },
-      body: JSON.stringify({
-        model: llmConfig.model,
-        messages: [
-          { role: 'system', content: resolvedConfig.llm.statusDetection.systemPrompt },
-          { role: 'user', content: snippet },
-        ],
-        max_tokens: resolvedConfig.llm.statusDetection.maxTokens,
-        temperature: 0,
-      }),
-      signal: controller.signal,
-    });
-
-    clearTimeout(timer);
-
-    if (!response.ok) {
-      cache.set(cacheKey, false);
-      return false;
-    }
-
-    const data = await response.json();
-    const result = (data?.choices?.[0]?.message?.content || '').trim().toLowerCase();
-    const isStatus = result.startsWith('yes');
+    const result = await classifyByEmbedding(snippet, 'status-detection-vectors.json');
+    const isStatus = result.matched && result.label === 'status-report';
     cache.set(cacheKey, isStatus);
     return isStatus;
   } catch {
     cache.set(cacheKey, false);
-    return false; // fail-open on timeout/error
+    return false;
   }
 }
 

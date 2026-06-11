@@ -56,7 +56,6 @@ export type {
   AuditEventType,
   NotificationChannel,
   NotificationChannelType,
-  LLMProvider,
   HostAdapter,
   SpawnOptions,
   HostEvent,
@@ -157,6 +156,9 @@ export type {
   AsyncDisciplineDecision,
   AsyncDisciplineDecisionKind,
   AsyncDisciplineGuardConfig,
+  JudgeVectorIntent,
+  VectorIntentJudgementResult,
+  VectorVerdict,
 } from './control/index.js';
 
 export type {

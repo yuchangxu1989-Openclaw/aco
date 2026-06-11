@@ -338,11 +338,9 @@ function generateRules(env: DetectedEnvironment): AcoRule[] {
         enabled: true,
         maxBlockingTimeoutMs: 5000,
         blockingActions: ['poll', 'wait', 'log', 'list'],
-        llmJudgement: {
+        vectorJudgement: {
           enabled: true,
-          provider: 'penguin-main',
-          model: 'claude-opus-4-7',
-          timeoutMs: 5000,
+          timeoutMs: 8000,
         },
         degradedRecoveryWindowMs: 300000,
         auditPath: join(env.openclawHome, 'workspace', 'logs', 'dispatch-guard-events.jsonl'),

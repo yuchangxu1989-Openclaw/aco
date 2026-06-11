@@ -4,8 +4,9 @@ import { AuditLogger } from '../audit-logger/audit-logger.js';
 import { readFile, writeFile, unlink, mkdir } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { evaluateAsyncDiscipline } from '../control/async-discipline-guard.js';
+import { evaluateAsyncDiscipline, type JudgeVectorIntent } from '../control/async-discipline-guard.js';
 import { generateAsyncDisciplineGuardPlugin } from '../generators/async-discipline-guard-plugin.js';
+import { loadSemanticVectorDb } from '../shared/semantic-vector-classifier.js';
 
 const testDir = '/tmp/aco-cli-test-' + Date.now();
 const boardPath = resolve(testDir, 'board.json');
@@ -36,6 +37,7 @@ describe('CLI', () => {
     delete process.env.ACO_BOARD_PATH;
     delete process.env.ACO_DATA_DIR;
     delete process.env.ACO_ASYNC_DISCIPLINE_AUDIT_PATH;
+    vi.unstubAllGlobals();
     process.chdir(originalCwd);
     try { await unlink(boardPath); } catch { /* ignore */ }
     try { await unlink(resolve(testDir, '.aco/audit.jsonl')); } catch { /* ignore */ }
@@ -354,13 +356,23 @@ describe('CLI', () => {
       const dispatchLogPath = resolve(testDir, 'logs/dispatch-guard-events.jsonl');
       process.env.ACO_ASYNC_DISCIPLINE_AUDIT_PATH = dispatchLogPath;
 
+      const denyVector: JudgeVectorIntent = async () => ({
+        ok: true,
+        label: 'deny',
+        score: 0.9,
+        confidenceBand: 'direct',
+        matchedSampleId: 'async-exemption-intent:deny:1',
+        matchedSampleText: '继续查一下状态',
+        providerId: 'volcengine-ark',
+        model: 'doubao-embedding-vision-251215',
+      });
       const decision = await evaluateAsyncDiscipline({
         toolName: 'process',
         toolArgs: { action: 'poll', timeout: 600000 },
         sessionKey: 'agent:main:feishu:direct:test',
         agentId: 'main',
         recentUserMessage: '请查一下状态',
-        judgeLlmIntent: async () => 'NO',
+        judgeVectorIntent: denyVector,
       }, new Date());
 
       await mkdir(resolve(testDir, 'logs'), { recursive: true });
@@ -391,10 +403,15 @@ describe('CLI', () => {
       await writeFile(pluginPath, generateAsyncDisciplineGuardPlugin({ auditLogPath: dispatchLogPath }), 'utf-8');
       const plugin = await import(`${pathToFileURL(pluginPath).href}?t=${Date.now()}`);
       const handlers = new Map<string, Function>();
+      const denySample = loadSemanticVectorDb().samples.find(sample => sample.id === 'async-exemption-intent:deny:1');
+      expect(denySample).toBeDefined();
+      vi.stubGlobal('fetch', vi.fn(async () => ({
+        ok: true,
+        json: async () => ({ data: [{ embedding: denySample!.vector }] }),
+      })));
       const api = {
         pluginConfig: {},
-        config: { models: { providers: { 'penguin-main': { baseUrl: 'http://127.0.0.1', apiKey: 'test', models: ['claude-opus-4-7'] } } } },
-        openclaw: { chat: { complete: vi.fn(async () => ({ text: 'NO' })) } },
+        config: { models: { providers: { 'volcengine-ark': { baseUrl: 'https://ark.cn-beijing.volces.com/api/v3', apiKey: 'test' } } } },
         logger: { warn: vi.fn(), error: vi.fn() },
         on: (name: string, handler: Function) => handlers.set(name, handler),
       };

@@ -22,11 +22,18 @@ describe('Scheduler', () => {
   beforeEach(() => {
     scheduler = new Scheduler({ defaultTimeout: 600, minTimeout: 300 });
     scheduler.setHostAdapter(mockAdapter);
-    scheduler.setLLMProvider({
-      async classify(prompt, categories) {
-        if (prompt.includes('audit')) return 'audit';
-        return 'code';
-      },
+    scheduler.setVectorClassifier(async ({ text }) => {
+      const label = text.includes('audit') ? 'audit' : 'code';
+      return {
+        ok: true,
+        label,
+        score: 0.85,
+        confidenceBand: 'direct' as const,
+        matchedSampleId: null,
+        matchedSampleText: null,
+        providerId: 'mock',
+        model: 'mock',
+      };
     });
 
     // 注册 Agent 池

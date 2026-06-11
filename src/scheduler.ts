@@ -7,11 +7,11 @@ import { EventBus } from './event/event-bus.js';
 import { TaskQueue } from './task/task-queue.js';
 import { ResourcePool } from './pool/resource-pool.js';
 import { RuleEngine } from './dispatch/rule-engine.js';
+import type { TaskTypeVectorClassifier } from './dispatch/rule-engine.js';
 import type {
   AcoConfig,
   CreateTaskInput,
   HostAdapter,
-  LLMProvider,
   Task,
   Tier,
 } from './types/index.js';
@@ -43,8 +43,8 @@ export class Scheduler {
     this.hostAdapter = adapter;
   }
 
-  setLLMProvider(provider: LLMProvider): void {
-    this.ruleEngine.setLLMProvider(provider);
+  setVectorClassifier(classifier: TaskTypeVectorClassifier): void {
+    this.ruleEngine.setVectorClassifier(classifier);
   }
 
   /**

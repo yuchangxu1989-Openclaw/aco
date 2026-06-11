@@ -6,8 +6,9 @@
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import { RuleEngine } from '../src/dispatch/rule-engine.js';
+import type { TaskTypeVectorClassifier } from '../src/dispatch/rule-engine.js';
 import { EventBus } from '../src/event/event-bus.js';
-import type { AgentSlot, DispatchRule, LLMProvider, Task } from '../src/types/index.js';
+import type { AgentSlot, DispatchRule, Task } from '../src/types/index.js';
 
 function makeTask(overrides?: Partial<Task>): Task {
   return {
@@ -41,13 +42,22 @@ function makeAgent(overrides?: Partial<AgentSlot>): AgentSlot {
   };
 }
 
-const mockLLM: LLMProvider = {
-  async classify(prompt: string, categories: string[]): Promise<string> {
-    if (prompt.toLowerCase().includes('audit')) return 'audit';
-    if (prompt.toLowerCase().includes('code') || prompt.toLowerCase().includes('implement')) return 'code';
-    if (prompt.toLowerCase().includes('spec')) return 'spec';
-    return categories[0];
-  },
+const mockVectorClassifier: TaskTypeVectorClassifier = async ({ text }) => {
+  let label: string | null = null;
+  if (text.toLowerCase().includes('audit')) label = 'audit';
+  else if (text.toLowerCase().includes('code') || text.toLowerCase().includes('implement')) label = 'code';
+  else if (text.toLowerCase().includes('spec')) label = 'spec';
+
+  return {
+    ok: label !== null,
+    label,
+    score: label ? 0.85 : 0,
+    confidenceBand: label ? 'direct' as const : 'none' as const,
+    matchedSampleId: null,
+    matchedSampleText: null,
+    providerId: 'mock',
+    model: 'mock',
+  };
 };
 
 describe('RuleEngine', () => {
@@ -57,7 +67,7 @@ describe('RuleEngine', () => {
   beforeEach(() => {
     eventBus = new EventBus();
     engine = new RuleEngine(eventBus);
-    engine.setLLMProvider(mockLLM);
+    engine.setVectorClassifier(mockVectorClassifier);
   });
 
   describe('FR-B01: 角色-任务匹配校验', () => {
@@ -118,7 +128,7 @@ describe('RuleEngine', () => {
     it('AC5/AC6: LLM 语义分类', async () => {
       const result = await engine.classifyTask(makeTask({ prompt: 'Audit the implementation' }));
       expect(result.taskType).toBe('audit');
-      expect(result.source).toBe('llm');
+      expect(result.source).toBe('embedding');
     });
 
     it('AC6: 声明式标注优先于 LLM', async () => {
