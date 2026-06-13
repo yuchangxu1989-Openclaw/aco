@@ -9,8 +9,8 @@ const NOTIFY_USER_ID = 'ou_ba47b9dd81419f75c4febdd199bde7d8';
 export default {
   id: 'aco-notify',
   name: 'aco-notify',
-  version: '1.6.1',
-  description: 'Dual-mechanism: L2 message_sending auto-forward + L6 before_prompt_build reminder',
+  version: '1.6.2',
+  description: 'Active Feishu notification on subagent completion with reminder fallback',
 
   register(api) {
     const config = api.pluginConfig?.['aco-notify'] || {};
@@ -75,6 +75,21 @@ export default {
       } catch (e) {
         return { success: false, error: e.message };
       }
+    }
+
+    function buildCompletionNotice({ failed, timeout, duration }) {
+      const lines = [];
+      if (failed) {
+        lines.push('委派任务没有顺利完成。');
+        lines.push(`状态：${timeout ? '执行超时' : '执行失败'}。`);
+        if (duration !== '?') lines.push(`用时约 ${duration}。`);
+        lines.push('我会继续处理失败原因并收口。');
+      } else {
+        lines.push('委派任务已完成。');
+        if (duration !== '?') lines.push(`用时约 ${duration}。`);
+        lines.push('我会继续完成验收和收口。');
+      }
+      return lines.join('\n');
     }
 
     function handleClosureTimeout(closureId, data) {
@@ -194,8 +209,8 @@ export default {
         if (shouldExclude(label)) return;
 
         const outcome = String(event.outcome || '').toLowerCase();
-        const failed = outcome === 'error' || outcome === 'timeout';
-        const icon = failed ? '❌' : '✅';
+        const timeout = outcome === 'timeout';
+        const failed = outcome === 'error' || timeout;
 
         let runtimeMs = 0;
         if (spawnData?.spawnedAt && event.endedAt) {
@@ -206,20 +221,42 @@ export default {
         const duration = formatDuration(runtimeMs);
 
         const closureId = `${agentId}:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`;
+        const notice = buildCompletionNotice({ failed, timeout, duration });
+        const sendResult = sendToFeishu(notice);
+
+        if (sendResult.success) {
+          appendAuditLog({
+            event: 'subagent_completion_notified',
+            closureId,
+            agentId,
+            label,
+            duration,
+            outcome,
+            latencyMs: 0,
+          });
+          return;
+        }
+
         const timer = setTimeout(() => {
-          handleClosureTimeout(closureId, { agentId, label, duration, icon });
+          handleClosureTimeout(closureId, { agentId, label, duration });
         }, closureTimeoutMs);
         if (timer.unref) timer.unref();
 
         pendingClosures.set(closureId, {
-          agentId, label, duration, icon, timer,
+          agentId, label, duration, timer,
           completedAt: Date.now(),
           sessionKey,
           larkSent: false,
         });
 
         appendAuditLog({
-          event: 'completion_registered', closureId, agentId, label, duration, outcome,
+          event: 'completion_notification_failed',
+          closureId,
+          agentId,
+          label,
+          duration,
+          outcome,
+          sendResult: sendResult.error,
           timeoutMs: closureTimeoutMs,
         });
       } catch (e) {
@@ -278,7 +315,7 @@ export default {
     );
 
     // --- Event: message_sending ---
-    // L2: auto-forward main agent reply to feishu when pending closures exist
+    // Fallback only: if active completion notification failed, forward the next suitable main reply.
     api.on(
       'message_sending',
       (event, ctx) => {
@@ -350,6 +387,6 @@ export default {
       { priority: 100 },
     );
 
-    api.logger?.info?.('[aco-notify] plugin registered (v1.6.1 — dual: L2 auto-forward + L6 reminder)');
+    api.logger?.info?.('[aco-notify] plugin registered (v1.6.2 — active subagent completion notify + fallback reminder)');
   }
 };
